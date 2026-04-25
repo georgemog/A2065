@@ -100,8 +100,9 @@ void do_transmit(void)
             volatile uint8_t *pm = boardram + addr;
             for (i = 0; i < size && outsize < MAX_PACKET_SIZE; i++)
                 transmitbuffer[outsize++] = pm[i & RAM_MASK];
-            /* Auto-pad to 60 bytes if APAD_XMT set (CSR4 bit 11) */
-            while (size < 60) { transmitbuffer[outsize++] = 0; size++; }
+            if ((tmd1 & TX_ENP) && outsize < 60) {
+                while (outsize < 60) transmitbuffer[outsize++] = 0;
+            }
             (*tdr_offset)++;
         }
 

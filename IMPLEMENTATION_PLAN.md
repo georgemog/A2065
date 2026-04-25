@@ -243,9 +243,9 @@ Test with synthetic boardram contents.
 
 ### Done When
 
-- [ ] All ring tests pass
-- [ ] CRC32 bytes appended to RX frames correctly
-- [ ] Chained TX (STP in one descriptor, ENP in another) handled
+- [x] All ring tests pass
+- [x] CRC32 bytes appended to RX frames correctly
+- [x] Chained TX (STP in one descriptor, ENP in another) handled
 
 ---
 
