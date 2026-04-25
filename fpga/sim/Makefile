@@ -1,0 +1,23 @@
+IVERILOG = iverilog
+VVP      = vvp
+
+RTL = ../rtl
+
+.PHONY: all sim_autoconfig sim_registers sim_boardram clean
+
+all: sim_autoconfig
+
+sim_autoconfig: tb_autoconfig
+	$(VVP) tb_autoconfig
+
+tb_autoconfig: tb_autoconfig.v $(RTL)/a2065_autoconfig.v
+	$(IVERILOG) -o $@ $^
+
+sim_registers: tb_registers
+	$(VVP) tb_registers
+
+tb_registers: tb_registers.v $(RTL)/a2065_registers.v
+	$(IVERILOG) -o $@ $^
+
+clean:
+	rm -f tb_autoconfig tb_registers tb_boardram *.vcd

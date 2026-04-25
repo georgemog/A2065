@@ -1,0 +1,8 @@
+build/
+*.o
+*.device
+*.d
+*.swp
+*~
+.DS_Store
+arm/mac_test_dbg
