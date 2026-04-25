@@ -302,11 +302,11 @@ Write a companion `bridge_client.cpp` that:
 
 ### Done When
 
-- [ ] Daemon starts without errors on dev machine
-- [ ] Init sequence completes (IDON set)
-- [ ] TX path: frame from ring reaches raw socket
-- [ ] RX path: frame from raw socket reaches ring
-- [ ] Ctrl+C cleanly shuts down daemon
+- [x] Daemon starts without errors on dev machine
+- [x] Init sequence completes (IDON set)
+- [x] TX path: frame from ring reaches raw socket
+- [x] RX path: frame from raw socket reaches ring
+- [x] Ctrl+C cleanly shuts down daemon
 
 ---
 
