@@ -387,10 +387,10 @@ cd fpga/sim && make sim_autoconfig
 
 ### Done When
 
-- [ ] All simulation tests pass in iverilog
-- [ ] Waveform (VCD) shows correct nibble sequence
-- [ ] SHUTUP write silences autoconfig correctly
-- [ ] Synthesises with zero critical warnings in Quartus
+- [x] All simulation tests pass in iverilog
+- [x] Waveform (VCD) shows correct nibble sequence
+- [x] SHUTUP write silences autoconfig correctly
+- [x] Synthesises with zero critical warnings in Quartus
 
 ---
 

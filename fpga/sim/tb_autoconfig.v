@@ -95,14 +95,21 @@ module tb_autoconfig;
     task bus_read;
         input [23:0] addr;
         output [15:0] data;
+        reg got_dtack;
+        integer timeout;
         begin
             @(negedge clk);
             cpu_addr  = addr;
             cpu_rw    = 1'b1;
             cpu_as_n  = 1'b0;
-            @(negedge cpu_dtack_n);
+            got_dtack = 0;
+            timeout   = 0;
+            while (!got_dtack && timeout < 1000) begin
+                @(negedge clk);
+                if (cpu_dtack_n === 1'b0) got_dtack = 1;
+                timeout = timeout + 1;
+            end
             data = cpu_data_out;
-            @(posedge clk);
             cpu_as_n = 1'b1;
             cpu_rw   = 1'b1;
         end
