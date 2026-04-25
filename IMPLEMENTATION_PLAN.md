@@ -186,8 +186,8 @@ offset 20: TDR (tx descriptor ring: 3-bit tlen | 24-bit tdra | 000)
 
 ### Done When
 
-- [ ] All CSR tests pass
-- [ ] Simulated driver can complete init without polling timeout
+- [x] All CSR tests pass
+- [x] Simulated driver can complete init without polling timeout
 
 ---
 

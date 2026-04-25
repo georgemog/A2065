@@ -94,12 +94,12 @@ static void chip_init(void)
     am_tdr_tdra = tdr & 0x00fffff8;
 
     /* MAC from init block (byte-swapped pairs) */
-    fakemac[0] = get_ram_byte(3);
-    fakemac[1] = get_ram_byte(2);
-    fakemac[2] = get_ram_byte(5);
-    fakemac[3] = get_ram_byte(4);
-    fakemac[4] = get_ram_byte(7);
-    fakemac[5] = get_ram_byte(6);
+    fakemac[0] = get_ram_byte(off + 3);
+    fakemac[1] = get_ram_byte(off + 2);
+    fakemac[2] = get_ram_byte(off + 5);
+    fakemac[3] = get_ram_byte(off + 4);
+    fakemac[4] = get_ram_byte(off + 7);
+    fakemac[5] = get_ram_byte(off + 6);
 
     chip_init_mask();
     fprintf(stderr, "[a2065] chip_init: mode=%04X rdr_rlen=%u tdr_tlen=%u "
