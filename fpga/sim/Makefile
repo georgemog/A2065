@@ -5,7 +5,7 @@ RTL = ../rtl
 
 .PHONY: all sim_autoconfig sim_registers sim_boardram clean
 
-all: sim_autoconfig
+all: sim_autoconfig sim_boardram
 
 sim_autoconfig: tb_autoconfig
 	$(VVP) tb_autoconfig
@@ -17,6 +17,12 @@ sim_registers: tb_registers
 	$(VVP) tb_registers
 
 tb_registers: tb_registers.v $(RTL)/a2065_registers.v
+	$(IVERILOG) -o $@ $^
+
+sim_boardram: tb_boardram
+	$(VVP) tb_boardram
+
+tb_boardram: tb_boardram.v $(RTL)/a2065_boardram.v
 	$(IVERILOG) -o $@ $^
 
 clean:

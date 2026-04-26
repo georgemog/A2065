@@ -434,7 +434,7 @@ assign bridge_addr = {boardram_base_arm, cpu_addr[14:0]};
 
 ### Done When
 
-- [ ] Simulation passes all boardram read/write cases
+- [x] Simulation passes all boardram read/write cases
 - [ ] Timing constraints met (Quartus timing analysis clean)
 - [ ] On MiSTer: ARM can write to boardram window, 68k reads correct value
 
