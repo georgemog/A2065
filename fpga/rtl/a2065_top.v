@@ -5,11 +5,8 @@
  *
  * Instantiates:
  *   a2065_autoconfig  — ZorroII autoconfig ROM + state machine
+ *   a2065_boardram    — 32KB dual-port boardram (68k + ARM bridge)
  *   a2065_registers   — DTACK-stretch for RAP/RDP chip register access
- *
- * boardram (32KB) is NOT instantiated here — it is mapped directly
- * through the HPS2FPGA lightweight bridge window. The FPGA just needs
- * to decode the address and assert DTACK for that range.
  *
  * Integration checklist (see IMPLEMENTATION_PLAN.md Step 9):
  *   [ ] Add this module to Minimig RTL hierarchy
@@ -56,7 +53,14 @@ module a2065_top (
     input  wire        arm_int_req,
 
     /* Enable (from OSD config) */
-    input  wire        a2065_enabled
+    input  wire        a2065_enabled,
+
+    /* ── ARM boardram bridge (32KB direct-mapped) ──────────────────── */
+    input  wire [14:1] arm_boardram_addr,
+    input  wire [15:0] arm_boardram_wdata,
+    output wire [15:0] arm_boardram_rdata,
+    input  wire        arm_boardram_wr,
+    input  wire        arm_boardram_sel
 );
 
     /* ── Internal signals ─────────────────────────────────────────── */
@@ -70,6 +74,8 @@ module a2065_top (
     wire [15:0] regs_data_out;
     wire        regs_dtack_n;
     wire        regs_berr_n;
+
+    wire [15:0] boardram_data_out;
 
     /* ── Autoconfig ───────────────────────────────────────────────── */
     a2065_autoconfig u_autoconfig (
@@ -114,20 +120,39 @@ module a2065_top (
     );
 
     /* ── boardram DTACK (direct HPS2FPGA, no ARM mediation needed) ── */
-    /* The boardram region (card+0x8000 to card+0xFFFF) is mapped       */
-    /* directly through the HPS2FPGA bridge. Standard DTACK timing.     */
-    wire sel_boardram = card_configured &&
-                        (cpu_addr[23:16] == card_base) &&
-                        (cpu_addr[15] == 1'b1) &&
-                        (!cpu_as_n);
+    wire card_sel = card_configured &&
+                    (cpu_addr[23:16] == card_base) &&
+                    (!cpu_as_n);
+
+    wire sel_boardram = card_sel && cpu_addr[15];
+
     reg boardram_dtack_n;
     always @(posedge clk or negedge rst_n)
         if (!rst_n) boardram_dtack_n <= 1'b1;
         else        boardram_dtack_n <= sel_boardram ? 1'b0 : 1'b1;
 
+    /* ── boardram (32KB dual-port) ───────────────────────────────── */
+    a2065_boardram u_boardram (
+        .clk            (clk),
+        .rst_n          (rst_n && a2065_enabled),
+        .cpu_addr       (cpu_addr[23:1]),
+        .cpu_data_in    (cpu_data_in),
+        .cpu_data_out   (boardram_data_out),
+        .cpu_rd         (cpu_rw),
+        .cpu_hwr        (~cpu_rw),
+        .cpu_lwr        (~cpu_rw),
+        .sel            (card_sel),
+        .arm_addr       (arm_boardram_addr),
+        .arm_data_in    (arm_boardram_wdata),
+        .arm_data_out   (arm_boardram_rdata),
+        .arm_wr         (arm_boardram_wr),
+        .arm_sel        (arm_boardram_sel)
+    );
+
     /* ── Output mux ───────────────────────────────────────────────── */
     assign cpu_data_out = (!autoconfig_dtack_n) ? autoconfig_data_out :
                           (!regs_dtack_n)        ? regs_data_out       :
+                          (!boardram_dtack_n)    ? boardram_data_out   :
                                                    16'hFFFF;
 
     assign cpu_dtack_n  = autoconfig_dtack_n & regs_dtack_n & boardram_dtack_n;
