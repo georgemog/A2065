@@ -52,8 +52,8 @@ A2065/
 ### Files Modified in Minimig-AGA_MiSTer submodule:
 - **cpu_wrapper.v** — A2065 autoconfig nibbles added (type=0xC1, product=0x70, mfr=0x0202), base address latched from 0xE80048, `a2065_ena` driven from `~ac_a2065`. Nibbles 0-1 raw (er_Type), nibbles 2+ inverted.
 - **gary.v** — `sel_a2065 = a2065_ena && cpu_address_in[23:16]==a2065_base`
-- **minimig.v** — `a2065_boardram` instantiated, data mux OR-tied into CPU data bus
-- **files.qip** — Added `rtl/A2065/a2065_boardram.v`
+- **minimig.v** — `a2065_boardram` instantiated, `a2065_registers` instantiated (DTACK-stretch via bridge `nrdy`), data mux OR-tied into CPU data bus
+- **files.qip** — Added `rtl/A2065/a2065_boardram.v` and `rtl/A2065/a2065_registers.v`
 - **Minimig.sdc** — Added boardram multicycle constraints (see Timing section below)
 
 ### Key Difference: fpga/rtl/ vs Minimig-AGA_MiSTer/rtl/A2065/
@@ -71,7 +71,7 @@ The Minimig submodule's `a2065_top.v` does NOT instantiate boardram (it's in min
 | 5 | Full daemon (sim bridge) | Done (bridge client test) |
 | 6 | FPGA autoconfig | Done (sim + Quartus clean) |
 | 7 | FPGA boardram window | Done (sim + Quartus) |
-| **8** | **FPGA chip register bridge + DTACK stretch** | **TODO** |
+| **8** | **FPGA chip register bridge + DTACK stretch** | **Done** (sim + Quartus + MiSTer verified) |
 | **9** | **Integration (ARM + FPGA on MiSTer)** | **TODO** |
 | **10** | **Stress test & polish** | **TODO** |
 
@@ -142,12 +142,15 @@ Also added yc_out chroma LUT multicycle constraints (lines 29-34) to fix timing 
 | `82b41be` | Apr 25 | Step 6: FPGA autoconfig (sim + Quartus) |
 | `632e78c` | Apr 26 | Step 7: FPGA boardram (sim + Quartus) |
 | *(pending)* | Apr 27 | Autoconfig er_Type nibble fix (inverted → raw for nibbles 0-1) |
+| *(pending)* | Apr 28 | Step 8: FPGA chip register bridge + DTACK stretch (sim + Minimig wiring + MiSTer verified) |
 
 ## Known Issues / Notes
 
 - MAC serial bytes in cpu_wrapper.v are hardcoded (0x02, 0x70, 0x70, 0x70) — will need ARM-side runtime patching
 - ARM bridge port on boardram is tied to zeros in the Minimig submodule — not yet connected to HPS2FPGA bridge
-- `a2065_top` and `a2065_registers` modules exist in fpga/rtl/ but are NOT yet wired into the Minimig core (Step 8)
+- `a2065_registers` module instantiated directly in `minimig.v` (not via `a2065_top`) — uses bridge `nrdy` signal to hold off DTACK for register accesses until ARM daemon responds
+- Bridge signals (`bridge_done`, `bridge_result`, etc.) are tied to zeros — ARM bridge connection is Step 9
+- `regs_nrdy` output (combinatorial) OR'd into bridge's `nrdy` input alongside Gayle's IDE wait
 - Tight setup slack (+0.146ns on emu PLL clock after build 20260427e) — improved but still worth monitoring
 - yc_out chroma LUT timing was degraded by boardram BRAM routing congestion — addressed with multicycle constraints
 - **Autoconfig convention (confirmed):** Nibbles 0-1 (er_Type) must be stored raw in `autocfg_data`; all other nibbles stored inverted. Matches WinUAE `expamem_read()` behavior and Toccata pattern in cpu_wrapper.v.

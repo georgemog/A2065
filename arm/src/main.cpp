@@ -35,7 +35,7 @@ static volatile sig_atomic_t running = 1;
 static volatile uint8_t *bridge = NULL;
 static int sim_mode = 0;
 
-static void handle_signal(int sig) { (void)sig; running = 0; }
+static void handle_signal(int sig) { (void)sig; running = 0; ethernet_close(); }
 
 static void on_interrupt_cb(void)
 {
@@ -106,7 +106,7 @@ static void daemon_set_default_mac(void)
 
 int main(int argc, char *argv[])
 {
-    const char *iface       = "eth1";
+    const char *iface       = "eth0";
     uint32_t    bridge_base = BRIDGE_PHYS_BASE;
 
     for (int i = 1; i < argc; i++) {

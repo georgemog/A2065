@@ -32,7 +32,6 @@ module a2065_boardram (
     /* ── ARM bridge (Port B) ──────────────────────────────────────── */
     input  wire [14:1] arm_addr,
     input  wire [15:0] arm_data_in,
-    output reg  [15:0] arm_data_out,
     input  wire        arm_wr,
     input  wire        arm_sel
 );
@@ -45,23 +44,18 @@ module a2065_boardram (
 
     reg [15:0] ram [0:16383];
     reg [15:0] ram_rd;
-    reg [15:0] arm_ram_rd;
 
     always @(posedge clk) begin
-        if (sel_boardram && ~cpu_rd)
+        if (sel_boardram && (cpu_hwr || cpu_lwr))
             ram[ram_addr_a] <= cpu_data_in;
-        if (arm_sel && arm_wr)
-            ram[ram_addr_b] <= arm_data_in;
     end
 
     always @(posedge clk) begin
-        ram_rd     <= ram[ram_addr_a];
-        arm_ram_rd <= ram[ram_addr_b];
+        ram_rd <= ram[ram_addr_a];
     end
 
     always @(*) begin
-        cpu_data_out  = sel_boardram ? ram_rd     : 16'h0000;
-        arm_data_out  = arm_sel      ? arm_ram_rd : 16'h0000;
+        cpu_data_out = sel_boardram ? ram_rd : 16'h0000;
     end
 
 endmodule

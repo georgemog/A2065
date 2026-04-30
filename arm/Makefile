@@ -3,8 +3,9 @@ CXX = g++
 AR  = ar
 
 # Cross-compile for MiSTer ARMv7
-CROSS_CXX = arm-none-linux-gnueabihf-g++
-CROSS_CC  = arm-none-linux-gnueabihf-gcc
+CROSS_PREFIX = /opt/armV7-linux-gcc/bin/arm-none-linux-gnueabihf-
+CROSS_CXX = $(CROSS_PREFIX)g++
+CROSS_CC  = $(CROSS_PREFIX)gcc
 
 CXXFLAGS_COMMON = -std=c++11 -Wall -Wextra -O2 -I include
 CFLAGS_COMMON   = -std=c99   -Wall -Wextra -O2 -I include
@@ -14,7 +15,7 @@ CXXFLAGS_ARM    = $(CXXFLAGS_COMMON) \
                   -march=armv7-a -mtune=cortex-a9 \
                   -mfloat-abi=hard -mfpu=neon
 
-LDFLAGS = -lpthread
+LDFLAGS = -lpthread -lrt
 
 BUILD_NATIVE = build/native
 BUILD_ARM    = build/arm
@@ -24,6 +25,8 @@ SRCS = src/mac.cpp \
        src/rings.cpp \
        src/ethernet.cpp \
        src/bridge.cpp \
+       src/bridge_sim.cpp \
+       src/crc32.cpp \
        src/main.cpp
 
 OBJS_NATIVE = $(patsubst src/%.cpp, $(BUILD_NATIVE)/%.o, $(SRCS))

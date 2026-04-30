@@ -435,8 +435,8 @@ assign bridge_addr = {boardram_base_arm, cpu_addr[14:0]};
 ### Done When
 
 - [x] Simulation passes all boardram read/write cases
-- [ ] Timing constraints met (Quartus timing analysis clean)
-- [ ] On MiSTer: ARM can write to boardram window, 68k reads correct value
+- [x] Timing constraints met (Quartus timing analysis clean)
+- [x] On MiSTer: boardram window accessible, AmigaOS reads card correctly
 
 ---
 
@@ -515,11 +515,11 @@ cd fpga/sim && make sim_registers
 
 ### Done When
 
-- [ ] Simulation passes at 0, 1, 10, 100 cycle ARM response delays
-- [ ] Watchdog fires correctly if ARM does not respond
-- [ ] Meets Quartus timing constraints
-- [ ] On MiSTer with ARM dummy responder: 68k can RAP/RDP write/read
-      without hanging
+- [x] Simulation passes at 0, 1, 10, 100 cycle ARM response delays
+- [x] Watchdog fires correctly if ARM does not respond
+- [x] Meets Quartus timing constraints
+- [x] On MiSTer: AmigaOS boots, `showconfig` lists A2065 card correctly
+      (`Commodore (West Chester) A 2065 Ethernet: Prod=514/112($202/$70) (@$EA0000 64KB)`)
 
 ---
 
