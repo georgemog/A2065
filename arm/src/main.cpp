@@ -75,7 +75,6 @@ static void service_bridge(void)
     BRIDGE_WRITE16(bridge, BRIDGE_REG_RESULT, result);
     __sync_synchronize();
     BRIDGE_WRITE8(bridge, BRIDGE_REG_DONE, 1);
-    BRIDGE_WRITE8(bridge, BRIDGE_REG_NEW_REQ, 0);
 }
 
 static void daemon_set_default_mac(void)

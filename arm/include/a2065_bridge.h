@@ -15,7 +15,11 @@
  *   0x8000–0xFFFF  boardram (32KB — direct mapped)
  */
 
-#define BRIDGE_PHYS_BASE    0x27FF0000UL    /* adjust to actual Platform Designer mapping */
+/*
+ * MiSTer DE10-Nano HPS-to-FPGA full bridge: ARM phys 0xC0000000 -> FPGA addr 0.
+ * The A2065 AXI slave decodes the lower 16 bits of the FPGA address.
+ */
+#define BRIDGE_PHYS_BASE    0xC0000000UL
 #define BRIDGE_WINDOW_SIZE  0x10000UL       /* 64KB */
 
 /* Chip register bridge offsets (relative to bridge base) */

@@ -9,6 +9,7 @@
  */
 
 #include "a2065_types.h"
+#include "boardram_access.h"
 #include "a2065_bridge.h"
 #include <stdint.h>
 #include <string.h>
@@ -30,13 +31,19 @@ static int       tdr_offset = 0, rdr_offset = 0;
 static uint8_t  fakemac[6];
 
 /* boardram pointer — set by bridge.cpp via registers_set_boardram() */
+#ifndef BOARDRAM_REMOTE
 volatile uint8_t *boardram = NULL;
+#endif
 
 /* Callbacks into main.cpp */
 static void (*on_interrupt)(void) = NULL;
 static void (*on_transmit)(void)  = NULL;
 
-void registers_set_boardram(volatile uint8_t *ram)  { boardram = ram; }
+void registers_set_boardram(volatile uint8_t *ram)  {
+#ifndef BOARDRAM_REMOTE
+    boardram = ram;
+#endif
+}
 void registers_set_fakemac(const uint8_t *mac)       { memcpy(fakemac, mac, 6); }
 void registers_set_on_interrupt(void (*fn)(void))    { on_interrupt = fn; }
 void registers_set_on_transmit(void (*fn)(void))     { on_transmit = fn; }
@@ -56,15 +63,7 @@ uint64_t registers_ladrf(void)       { return am_ladrf; }
 int      registers_prom(void)        { return (am_mode & MODE_PROM) ? 1 : 0; }
 void     registers_get_fakemac(uint8_t *out) { memcpy(out, fakemac, 6); }
 
-/* ── Boardram helpers (duplicated from rings.cpp for init block read) ─ */
-static uint8_t get_ram_byte(uint32_t off)
-{
-    return boardram[off & RAM_MASK];
-}
-static uint16_t get_ram_word(uint32_t off)
-{
-    return ((uint16_t)get_ram_byte(off) << 8) | get_ram_byte(off + 1);
-}
+/* ── Boardram helpers (see boardram_access.h) ─ */
 
 /* ── Initialization ─────────────────────────────────────────────────── */
 static void chip_init_mask(void)

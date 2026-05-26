@@ -3,7 +3,7 @@ VVP      = vvp
 
 RTL = ../rtl
 
-.PHONY: all sim_autoconfig sim_registers sim_boardram clean
+.PHONY: all sim_autoconfig sim_registers sim_boardram sim_bridge_e2e clean
 
 all: sim_autoconfig sim_boardram
 
@@ -25,5 +25,11 @@ sim_boardram: tb_boardram
 tb_boardram: tb_boardram.v $(RTL)/a2065_boardram.v
 	$(IVERILOG) -o $@ $^
 
+sim_bridge_e2e: tb_bridge_e2e
+	$(VVP) tb_bridge_e2e
+
+tb_bridge_e2e: tb_bridge_e2e.v $(RTL)/a2065_registers.v
+	$(IVERILOG) -o $@ $^
+
 clean:
-	rm -f tb_autoconfig tb_registers tb_boardram *.vcd
+	rm -f tb_autoconfig tb_registers tb_boardram tb_bridge_e2e *.vcd

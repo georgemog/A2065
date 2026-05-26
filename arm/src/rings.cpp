@@ -7,12 +7,15 @@
 
 #include "a2065_types.h"
 #include "a2065_bridge.h"
+#include "boardram_access.h"
 #include <stdint.h>
 #include <string.h>
 #include <stdio.h>
 
 /* External references — resolved at link time */
+#ifndef BOARDRAM_REMOTE
 extern volatile uint8_t *boardram;
+#endif
 extern int mungepacket(uint8_t *packet, int len);
 extern uint32_t crc32_compute(const uint8_t *data, int len);
 extern void ethernet_send(const uint8_t *frame, int len);
@@ -35,24 +38,7 @@ extern void     rethink(void);
 static uint8_t transmitbuffer[MAX_PACKET_SIZE];
 static int     transmitlen = 0;
 
-/* ── Boardram accessors ─────────────────────────────────────────────── */
-static uint8_t get_ram_byte(uint32_t off)
-{
-    return boardram[off & RAM_MASK];
-}
-static uint16_t get_ram_word(uint32_t off)
-{
-    return ((uint16_t)get_ram_byte(off) << 8) | get_ram_byte(off + 1);
-}
-static void put_ram_byte(uint32_t off, uint8_t v)
-{
-    boardram[off & RAM_MASK] = v;
-}
-static void put_ram_word(uint32_t off, uint16_t v)
-{
-    put_ram_byte(off, v >> 8);
-    put_ram_byte(off + 1, (uint8_t)v);
-}
+/* ── Boardram accessors (see boardram_access.h) ─ */
 
 /* ── do_transmit ────────────────────────────────────────────────────── */
 void do_transmit(void)
@@ -60,6 +46,9 @@ void do_transmit(void)
     int i, err = 0, outsize = 0, add_fcs;
     uint32_t addr, off;
     uint16_t tmd0, tmd1, tmd2, tmd3;
+
+    uint16_t csr0 = registers_csr0();
+    if (!(csr0 & CSR0_TXON)) return;
 
     uint32_t tdr_tdra = registers_tdr_tdra();
     uint32_t tdr_tlen = registers_tdr_tlen();
@@ -97,9 +86,9 @@ void do_transmit(void)
             tmd1 &= ~TX_OWN;
             int size = (int)(65536 - tmd2);
             if (size > MAX_PACKET_SIZE) size = MAX_PACKET_SIZE;
-            volatile uint8_t *pm = boardram + addr;
-            for (i = 0; i < size && outsize < MAX_PACKET_SIZE; i++)
-                transmitbuffer[outsize++] = pm[i & RAM_MASK];
+            ram_read_block(addr, (uint8_t *)&transmitbuffer[outsize], size);
+            outsize += size;
+            if (outsize > MAX_PACKET_SIZE) outsize = MAX_PACKET_SIZE;
             if ((tmd1 & TX_ENP) && outsize < 60) {
                 while (outsize < 60) transmitbuffer[outsize++] = 0;
             }
@@ -152,6 +141,7 @@ void gotfunc(const uint8_t *databuf, int len)
 
     if (!(registers_csr0() & CSR0_RXON)) return;
     if (len < 20) return;
+    if (!registers_rdr_rlen()) return;
 
     registers_get_fakemac(fakemac_buf);
 
@@ -223,9 +213,8 @@ void gotfunc(const uint8_t *databuf, int len)
         if (first) { rmd1 |= RX_STP; first = 0; }
 
         size = (int)(65536 - rmd2);
-        volatile uint8_t *pr = boardram + addr;
-        for (i = 0; i < size && insize < len; i++, insize++)
-            pr[i & RAM_MASK] = d[insize];
+        ram_write_block(addr, &d[insize], size);
+        insize += size;
 
         if (insize >= len) {
             rmd1 |= RX_ENP;

@@ -3,12 +3,16 @@
  *
  * Replaces Amiberry's WinPcap/libpcap layer.
  * Sends and receives raw Ethernet frames via Linux AF_PACKET socket.
+ *
+ * Stub implementation for non-Linux builds (macOS native testing).
  */
 
 #include "a2065_types.h"
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+
+#ifdef __linux__
 #include <sys/socket.h>
 #include <sys/ioctl.h>
 #include <net/if.h>
@@ -39,7 +43,6 @@ int ethernet_open(const char *iface, int promiscuous)
     }
     int ifindex = ifr.ifr_ifindex;
 
-    /* Get host MAC */
     if (ioctl(sock_fd, SIOCGIFHWADDR, &ifr) == 0)
         memcpy(host_mac, ifr.ifr_hwaddr.sa_data, 6);
 
@@ -94,3 +97,32 @@ void ethernet_get_mac(uint8_t *mac_out)
 {
     memcpy(mac_out, host_mac, 6);
 }
+
+#else
+
+int ethernet_open(const char *iface, int promiscuous)
+{
+    (void)iface; (void)promiscuous;
+    fprintf(stderr, "[a2065] ethernet: stub (non-Linux build)\n");
+    return 1;
+}
+
+void ethernet_close(void) {}
+
+void ethernet_send(const uint8_t *frame, int len)
+{
+    (void)frame; (void)len;
+}
+
+int ethernet_recv(uint8_t *buf, int maxlen)
+{
+    (void)buf; (void)maxlen;
+    return -1;
+}
+
+void ethernet_get_mac(uint8_t *mac_out)
+{
+    memset(mac_out, 0, 6);
+}
+
+#endif
