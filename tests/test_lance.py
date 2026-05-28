@@ -83,8 +83,6 @@ def diag_output(ssh):
     lance_log, _, _ = ssh.execute("cat /media/usb0/games/Amiga/shared/lance-test.log")
     print(f"\n--- lance-test.log ---\n{lance_log}\n")
 
-    ssh.load_core(CORE_NAME)
-
     yield cleaned
 
 

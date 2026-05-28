@@ -58,7 +58,11 @@ static uint16_t boardram_xfer(uint16_t off, int write, uint16_t wdata)
     }
 
     wr64(MBX_RAM_REQ, 0);
-    fprintf(stderr, "[boardram] timeout off=0x%04X rw=%d\n", off, write);
+    fprintf(stderr, "[boardram] timeout off=0x%04X rw=%d  DDR3: REQ=0x%016llX RSP=0x%016llX REG_REQ=0x%016llX\n",
+            off, write,
+            (unsigned long long)rd64(MBX_RAM_REQ),
+            (unsigned long long)rd64(MBX_RAM_RSP),
+            (unsigned long long)rd64(0x8000));
     return 0xFFFF;
 }
 

@@ -28,10 +28,15 @@ Full hardware emulation of the Commodore A2065 ZorroII Ethernet card for the Min
 - **m68k cross-compiler:** `root@192.168.1.98`, `/opt/amiga/bin/m68k-amigaos-gcc`
   - Source: `/opt/development/minimig/A2065/tests/`
   - Build: `/opt/amiga/bin/m68k-amigaos-gcc -noixemul -O2 -o <name> <name>.c`
-- **MiSTer:** `mister` or `mister.local` (root SSH access, IP 192.168.1.31)
+- **MiSTer:** `mister.broadband` (root SSH access, IP 192.168.1.31)
   - Deploy: `/media/fat/trans/` (RBF, ARM daemon, Amiga test binaries)
-  - Note: Build server 192.168.1.98 cannot resolve `mister` hostname — deploy via dev machine relay
-  - Note: MiSTer is intermittently offline — must verify reachability before deploy
+  - Note: Build server 192.168.1.98 cannot resolve `mister` hostname — deploy via dev machine relay using `root@mister.broadband`
+- **Python lance-test:** `tests/test_lance.py` (pytest, uses `mister_ssh.py` and `serial_long.py` helpers)
+  - Run: `cd tests && A2065_CORE=Minimig_20260527b.rbf python3 -m pytest test_lance.py -v -s`
+  - 6x runner: `cd tests && A2065_CORE=Minimig_20260527b.rbf python3 run_lance_6x.py`
+  - Core env var: `A2065_CORE` specifies which RBF to load
+  - lance-test binary: Pre-compiled Amiga binary at `/Volumes/Home/nigelshearman/Development/amiga/lance-test/`
+  - Disassembly: `/Volumes/Home/nigelshearman/Development/amiga/lance-test/lance_disasm.txt`
 
 ## Directory Structure
 
@@ -57,7 +62,11 @@ A2065/
 │       └── *_test.cpp          Unit tests
 ├── tests/
 │   ├── a2065_test.c        Basic register read/write test
-│   └── a2065_diag.c        RAP state diagnostic (7 tests, PASS/FAIL per test)
+│   ├── a2065_diag.c        RAP state diagnostic (7 tests, PASS/FAIL per test)
+│   ├── test_lance.py       Pytest lance-test runner (loads core, starts daemon, runs lance-test via serial)
+│   ├── run_lance_6x.py     Runs lance-test 6 times with stall/retry recovery
+│   ├── mister_ssh.py       MiSTer SSH helper (load_core, start/stop daemon)
+│   └── serial_long.py      Long-running serial connection helper
 ├── fpga/                   Verilog + sim + constraints
 │   ├── rtl/                a2065_top.v, a2065_autoconfig.v, a2065_registers.v, a2065_boardram.v
 │   ├── sim/                tb_autoconfig.v, tb_boardram.v (passing), tb_bridge_e2e.v (WIP)
@@ -121,6 +130,11 @@ A2065/
   - bit[0]=1 → assert INT2 (m68k level 2 interrupt via Paula PORTS), bit[0]=0 → deassert
   - Written by ARM daemon every main loop iteration based on CSR0_INTR && CSR0_INEA
   - FPGA polls every 256 cycles in S_IDLE (at poll_div==0xFE, alternating with RAM_REQ poll at 0xFF)
+
+**MAC mailbox (ARM→FPGA for dynamic MAC address):**
+- **MBX_MAC** at `DDR3_BASE + 0x8028` / Avalon `0x1005`
+  - bit[0]=1 (valid), bits[47:16]=MAC bytes (6 bytes packed), written once at daemon startup
+  - FPGA reads at startup during S_MAC_BOOT states (timing-dependent — may race with core load)
 
 ### Address mapping
 - **DDR3_BASE (ARM physical):** `0x1FF00000` (safe region above kernel RAM)
@@ -191,7 +205,7 @@ Interrupt path:
 - **Changes:** Added `S_RAM_BRAM_LAT` + `S_RAM_BRAM_WAIT` for BRAM registered read latency, fixed `avl_readdata[16:3]` address mapping (was `[16:2]`), stale mailbox clear at startup
 - **MiSTer verified:** 17/17 register tests + 5/5 boardram tests PASS
 
-### Build 20260525a (interrupt generation) — CURRENT
+### Build 20260525a (interrupt generation)
 - **Result:** SUCCESS, 0 errors, 86 warnings
 - **Timing:** Setup +0.283ns (emu PLL), Hold +0.245ns — all positive
 - **Changes:**
@@ -201,6 +215,76 @@ Interrupt path:
   4. `minimig.v`: 2-stage CDC synchronizer for `a2065_int2` (clk_audio→clk_sys), OR-tied into Paula's `int2`
   5. `main_ddr3.cpp`: Main loop writes `MBX_INT` every iteration based on `CSR0_INTR && CSR0_INEA`
 - **MiSTer verified:** 6/6 register/boardram tests PASS, 8/8 interrupt tests PASS (assert on IDON+INEA, deassert on clear, full lifecycle)
+
+### Build 20260527a (boardram poll budget + MAC DDR3 slot)
+- **Result:** SUCCESS, 0 errors
+- **Timing:** Setup +0.283ns (emu PLL)
+- **Changes:** `reg_budget[3:0]` counter in mailbox — RAM poll every 128 cycles instead of every cycle; MBX_MAC DDR3 slot at Avalon 0x1004 (later 0x1005) for dynamic MAC from ARM daemon
+- **MiSTer verified:** 0 boardram timeouts, interrupt test PASS
+
+### Build 20260527b (combined budget + MAC + interrupt fix)
+- **MiSTer verified:** lance-test 3/4 PASS — Buffer memory PASS, LANCE config PASS, Interrupt PASS, Collision FAIL
+
+### Build 20260527c (boardram address decoding fix) — REGRESSION
+- **Result:** SUCCESS, 0 errors
+- **Timing:** Setup +0.003ns (emu PLL)
+- **Changes to `a2065_boardram.v`:** Added `card_base` input; compute `rel_addr = cpu_addr - {card_base, 15'h0000}`; use `rel_addr[14]` for boardram select, `rel_addr[13:0]` for Port A BRAM address
+- **Changes to `minimig.v`:** Boardram instantiation passes `.card_base(a2065_base)`
+- **Intent:** Fix address decoding so Port A (68k) and Port B (ARM mailbox) address the same BRAM locations regardless of Zorro II base address
+- **Bug found:** Old code used `cpu_addr[15]` for select (only worked for odd bases like 0xE9) and `cpu_addr[14:1]` for address (included card base offset, mismatching Port B)
+- **MiSTer result:** REGRESSION — lance-test 4 runs: 2× interrupt FAIL, 2× LANCE config FAIL. Never reaches collision test. Previous build 20260527b was better (3/4 PASS)
+- **Root cause:** The `/media/fat/Minimig_20260527c.rbf` was a bad Quartus build — DDR3 path completely dead (all mailbox transactions timeout). Rebuilding with same source produced working DDR3 (`Minimig_20260527d.rbf`, 3,534,384 bytes vs broken 3,476,528 bytes). However, even with working DDR3, register path dies after 3-5 requests.
+
+### Build 20260527d (clean rebuild of boardram fix)
+- **Result:** SUCCESS, 0 errors, 87 warnings
+- **Timing:** Setup +0.003ns (emu PLL)
+- **File:** `/media/fat/Minimig_20260527d.rbf` (3,476,528 bytes — same as broken 20260527c but rebuilt with `rm -rf db`)
+- **MiSTer:** DDR3 boardram loopback 6/6 PASS, but register path still dies after 3-5 requests
+
+### Build 20260527h (fully committed code — no uncommitted changes)
+- **MiSTer:** Same register path death — daemon sees 5 requests then mailbox stuck in S_REG_DONE
+- **Confirmed:** Issue is NOT the boardram address fix or any FPGA source change
+
+### Critical Finding: S_REG_DONE Mailbox Adapter Stuck (Session 2025-05-27)
+- **Root cause:** `bridge_done` signal crosses clock domains (clk_audio → clk_sys) WITHOUT a CDC synchronizer. The register module in clk_sys domain may not reliably capture bridge_done pulses.
+- **Evidence:** Daemon processes 3-5 register requests correctly, then mailbox adapter gets stuck in `S_REG_DONE` waiting for `req_sync1` to go low. `req_sync1` depends on `bridge_new_req` from the register module, which is only cleared when `bridge_done` is seen. If `bridge_done` is missed due to CDC metastability, `bridge_new_req` stays high → `req_sync1` stays high → stuck forever.
+- **Signal path:** `a2065_ddr3_mailbox.bridge_done` (clk_audio) → `sys_top.v` → `Minimig.sv` → `minimig.v` → `a2065_registers.bridge_done` (clk_sys) — NO synchronizer in this path.
+- **Compare:** The `a2065_int2` interrupt signal has a 2-stage CDC synchronizer in minimig.v (working). `bridge_done` does NOT (broken).
+- **Fix in progress:** Add 2-stage CDC synchronizer for `bridge_done` and `bridge_result` in minimig.v, similar to the existing `a2065_int2` synchronizer.
+- **Why it worked before:** The May 25 session may have had slightly different Quartus routing that made the CDC work reliably. Timing slack was +0.283ns then vs +0.003ns now — the tighter timing makes metastability more likely.
+
+## ARM Daemon Changes (Session 2025-05-27)
+
+### TX_ERR/TX_RTRY Fix for Collision Test (`rings.cpp`)
+- **Problem:** Collision test in lance-test sends 10 packets in loopback+collision mode. Daemon's `do_transmit()` needed to set TX_ERR (0x4000) in TMD1 and TX_RTRY (0x0400) in TMD3 for collision path.
+- **Fix:** Added `tmd1 |= TX_ERR` and `put_ram_word(off + 2, tmd1)` in `do_transmit()` collision path in `rings.cpp`
+- **Status:** Applied but collision test still FAILS — only 5 of expected 10 do_transmit calls observed. Suspect race condition in TX descriptor ring walking or `service_bridge_safe` dropping CSR0 writes during do_transmit.
+
+### Diagnostic Logging
+- Debug log limit increased to 2000 requests
+- `service_bridge_safe` tagged `(safe)` in log
+- `do_transmit` logs entry with tdr_offset/tmd1/mode
+- TX_OWN clearing loop logs per-descriptor walk with tmd1 values
+- Collision path logs COLL TX (tmd1/tmd3/offset) and COLL RX (rmd1/verify/offset)
+
+### Collision Test Analysis (lance-test disassembly)
+- **Test function at 0x158E:** First calls init function (0x6a0) with mode=0x54 (LOOP|DTCR|COLL). If init fails (returns <0), test FAILS immediately.
+- **Loop at 0x15DE-0x160E:** 10 iterations, calls lance_send_pkt (0x1f8). If send returns <0 AND bit 10 of saved TMD3 (8510(a4)) is set, increments d4. PASS if d4==10.
+- **lance_send_pkt (0x1f8):** Uses next TX descriptor (tx_count wraps at tx_num-1). Writes packet data, TMD2 (negated size), TMD1 byte 0x83 (TX_OWN|TX_STP|TX_ENP), then CSR0=TDMD. Polls for TX_OWN clear (50-iteration timeout with WaitTOF). Error check: CSR0 bits 0x6800 (BABL/CERR/MERR), then `btst #6, 2(a0)` (TMD1 bit14=TX_ERR).
+- **TMD3 save at 0x34C:** `move.w 6(a0), 8510(a4)` — saves TMD3 AFTER TX_OWN poll completes. Daemon should have set TX_RTRY by then.
+- **tx_count=4** (set at 0x9BA), wraps at 3. TX ring has 4 descriptors.
+
+### Key Finding: service_bridge_safe Drops CSR0 Writes
+- `service_bridge_safe()` (called from boardram DDR3 transactions) only forwards RAP writes (addr=2) to `chip_wput()`. CSR0 writes (addr=0) are consumed (response sent, request cleared) but NOT processed.
+- Impact: When Amiga writes CSR0 (e.g., clearing status flags at end of lance_send_pkt) while daemon is in do_transmit, the write is silently dropped.
+- Observed: req 112 (safe) wrote CSR0=0xFF00 (clear all status) during desc 3 processing — dropped.
+- This may cause stale CSR0 state confusing the Amiga's polling loops.
+
+### Key Finding: TX_OWN Clearing Loop Walks Multiple Descriptors
+- The TX_OWN clearing loop (lines 153-162 in rings.cpp) starts at `start_offset` and walks forward until it finds TX_ENP.
+- For collision sends, the collision path (lines 131-142) re-reads the descriptor after gotfunc runs. If TX_OWN was already cleared (e.g., by a race), the collision path reads tmd1 without TX_OWN or TX_ENP, causing the TX_OWN clearing loop to walk into the NEXT descriptor.
+- Observed for desc 3: COLL TX tmd1=0x4000 (no TX_OWN, no TX_ENP). This caused the TX_OWN clearing loop to walk into desc 0, clearing TX_OWN on desc 0 prematurely and leaving tdr_offset=1 (wrong).
+- **Next step:** Investigate why desc 3 loses TX_ENP between the packet read loop and the collision path.
 
 ## ARM Daemon Changes (Session 2025-05-25)
 
@@ -258,10 +342,11 @@ Also yc_out chroma LUT multicycle constraints (lines 29-34) to fix timing degrad
 - **Boardram access:** Via DDR3 mailbox (`boardram_remote.cpp`) — word-level transactions
 - **Polling:** DDR3_BASE+0x8000 every 1µs, `do_transmit()` every 1000 iterations
 - **Interrupt:** Main loop writes MBX_INT (DDR3_BASE+0x8020) every iteration based on CSR0 state
-- **Current version:** Includes debug logging (`[req N]` lines, first 200 requests)
+- **Current version:** Includes debug logging (`[req N]` lines, first 2000 requests), TX_OWN clearing loop diagnostics, collision path TX_ERR/TX_RTRY
 - **Cross-compile:** scp source → 192.168.1.98 → compile → scp binary to MiSTer
 - **Startup sequence:** Write fake REG_RSP to unstick FPGA, wait 2ms, clear all mailboxes (REG_REQ/RSP, RAM_REQ/RSP, MBX_INT)
 - **Register processing:** Responds to register requests BEFORE calling chip_wput() (deadlock prevention)
+- **service_bridge_safe:** Called from boardram DDR3 transactions during do_transmit. Only forwards RAP writes to chip_wput — CSR0 writes are silently dropped. This causes stale CSR0 state when Amiga writes CSR0 during do_transmit processing.
 
 ### ARM Build Notes
 - `boardram_access.h` uses `extern "C"` for function declarations to match `boardram_remote.cpp` definitions
@@ -300,7 +385,8 @@ Also yc_out chroma LUT multicycle constraints (lines 29-34) to fix timing degrad
 - `boardram_remote.cpp` has unused `fd` variable (cosmetic warning)
 - `main_ddr3.cpp` format string warning for `%X` vs `long unsigned int` (cosmetic)
 - **Thread safety:** RX thread (`gotfunc`) and main thread both access CSR0 and boardram. No mutex protection. Currently benign because `registers_csr0()` reads a volatile uint16_t (atomic on ARM), and boardram DDR3 mailbox is single-threaded through `boardram_xfer()`. If issues arise, add locking.
-- **lance-test diags (build 20260524e):** Buffer memory PASS, LANCE config PASS, Interrupt test FAIL (interrupts not implemented then — now fixed in 20260525a), collision/loopback not reached. MAC showed `00:FFFFFF80:10:70:70:70` (byte ordering issue in MAC register readback or init block).
+- **lance-test diags (build 20260527b — best result):** Buffer memory PASS, LANCE config PASS, Interrupt PASS, Collision FAIL. MAC shows `00:FFFFFF80:10:00:04:2B` (partially fixed — last 3 bytes correct, first 3 bytes have byte ordering issue).
+- **lance-test diags (build 20260527c — REGRESSION):** 4 runs: 2× interrupt FAIL, 2× LANCE config FAIL. Boardram address fix broke init block access. **Use build 20260527b as baseline.**
 - **AddNetInterface A2065:** Daemon only saw 1 request then nothing. Driver appears to stall. May be related to now-fixed boardram timeouts or missing interrupt support.
 
 ## MiSTer Operational Notes
@@ -332,12 +418,14 @@ Also yc_out chroma LUT multicycle constraints (lines 29-34) to fix timing degrad
 | *(pending)* | May 13-14 | Arbiter fix attempts (v7-v9 all REGRESSED), poll throttle v10 |
 | *(pending)* | May 24 | Poll throttle build 20260524a, boardram BRAM latency fix 20260524e |
 | *(pending)* | May 25 | Deadlock fix, stale FPGA state fix, MAC fix, interrupt generation build 20260525a |
+| *(pending)* | May 27 | Boardram poll budget (20260527a), best baseline build 20260527b (3/4 PASS), boardram address fix 20260527c (REGRESSION) |
 
 ## Remaining Work
 
-1. **Re-run lance-test diags** with build 20260525a — verify interrupt test now passes
-2. **Investigate MAC byte ordering** — lance-test showed garbled MAC `00:FFFFFF80:10:70:70:70`
-3. **Test AddNetInterface A2065** — real AmigaOS driver test
-4. **Stress test & polish** (Step 10) — extended run stability, packet throughput
-5. **Thread safety review** — consider mutex for CSR0/boardram access if issues arise
-6. **Connect cpu_berr_n** — watchdog timeout should generate BERR, not return $0000
+1. **Revert to build 20260527b as baseline** — boardram address fix (20260527c) was a regression
+2. **Fix collision test** — only 5/10 do_transmit calls happen; TX_OWN clearing loop walks multiple descriptors when TX_ENP is lost; service_bridge_safe drops CSR0 writes during do_transmit
+3. **Investigate MAC byte ordering** — lance-test shows `00:FFFFFF80:10:00:04:2B` (first 3 bytes garbled)
+4. **Test AddNetInterface A2065** — real AmigaOS driver test
+5. **Stress test & polish** (Step 10) — extended run stability, packet throughput
+6. **Thread safety review** — consider mutex for CSR0/boardram access if issues arise
+7. **Connect cpu_berr_n** — watchdog timeout should generate BERR, not return $0000

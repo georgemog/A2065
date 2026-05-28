@@ -1,6 +1,55 @@
-# A2065 DDR3 Mailbox Integration — Progress Log
+# A2065 Progress Log
 
-## Session Date: May 3-4, 2026
+## Session: May 25-26, 2026 — Step 9 Integration + Step 10 lance-test Diags
+
+### Summary
+
+Full MiSTer integration verified. DDR3 mailbox stable, interrupt generation working. Ran Commodore lance-test diagnostics 6 times — Buffer Memory and LANCE Configuration always PASS. Two remaining issues: intermittent interrupt test failures (timing race) and RX buffer exhaustion during collision/loopback test.
+
+### MiSTer Verification Results (build 20260525a)
+
+| Test | Result |
+|------|--------|
+| Register read/write (17 tests) | PASS |
+| Boardram read/write (5 tests) | PASS |
+| Interrupt assert/deassert/lifecycle (8 tests) | PASS |
+| DDR3 stability (>60s idle) | PASS |
+
+### lance-test Diags (6 runs)
+
+| Test | Run 1 | Run 2 | Run 3 | Run 4 | Run 5 | Run 6 |
+|------|:-----:|:-----:|:-----:|:-----:|:-----:|:-----:|
+| Buffer memory | PASS | PASS | PASS | PASS | PASS | PASS |
+| LANCE config | PASS | PASS | PASS | PASS | PASS | PASS |
+| Interrupt | PASS | **FAIL** | PASS | **FAIL** | PASS | PASS |
+| Collision logic | **FAIL** | — | **FAIL** | — | **FAIL** | **FAIL** |
+
+**Failure mode 1 — Interrupt test (runs 2, 4):** Intermittent. Amiga writes INEA (0x4000) expecting CSR0=0x01C1 (IDON+INIT+INEA+INTR). Sometimes gets 0x0001 (no INTR) or 0x0004 (STOP). Likely timing race in CSR0 flag propagation.
+
+**Failure mode 2 — Collision logic test (runs 1, 3, 5, 6):** Test sends TX packets (60 bytes). After ~12-16 successful RX, the 16-entry RX ring exhausts and floods with "RX buffer error". Live network traffic on eth1 fills RX buffers faster than test reaps them. Collision test cannot complete.
+
+**MAC address:** Shows `00:FFFFFF80:10:70:70:70` in all runs — known byte ordering bug in init block readback (hardcoded serial bytes 0x02/0x70/0x70/0x70 in cpu_wrapper.v).
+
+### Key Fixes This Session
+
+1. **Deadlock fix (service_bridge):** ARM now writes REG_RSP *before* calling chip_wput(). Previously chip_wput() → chip_init() → boardram access → DDR3 RAM mailbox → FPGA stuck waiting for REG_RSP = deadlock.
+
+2. **Stale FPGA state fix:** On startup, write fake REG_RSP (0x1) to unstick FPGA left in register path by previous daemon. Eliminates core reload between restarts.
+
+3. **MAC address fix:** Moved daemon_set_default_mac() to after ethernet_open(). Was all-zero before.
+
+4. **Interrupt generation:** ARM writes MBX_INT every main loop iteration based on CSR0_INTR && CSR0_INEA. FPGA polls every 256 cycles. 2-stage CDC synchronizer (clk_audio→clk_sys) into Paula PORTS (INT2).
+
+### Remaining Issues
+
+- **MAC byte ordering:** Init block readback shows wrong bytes. Serial bytes in cpu_wrapper.v hardcoded as 0x02/0x70/0x70/0x70.
+- **Interrupt timing race:** 2/6 runs fail interrupt test. CSR0 flag propagation timing needs investigation.
+- **RX buffer exhaustion:** 16-entry RX ring too small for live network traffic during collision test. Need faster reaping, larger ring, or traffic filtering.
+- **cpu_berr_n** not connected — watchdog returns $0000 instead of BERR.
+
+---
+
+## Session: May 3-4, 2026 — DDR3 Mailbox Bring-up
 
 ## Summary
 

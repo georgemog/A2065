@@ -16,9 +16,11 @@
 extern void registers_reset(void);
 extern void registers_set_boardram(volatile uint8_t *ram);
 extern void registers_set_fakemac(const uint8_t *mac);
+extern void registers_get_fakemac(uint8_t *out);
 extern void registers_set_on_interrupt(void (*fn)(void));
 extern void registers_set_on_transmit(void (*fn)(void));
 extern uint16_t registers_csr0(void);
+extern uint16_t registers_mode(void);
 extern uint16_t chip_wget(uint8_t reg_offset);
 extern void chip_wput(uint8_t reg_offset, uint16_t v);
 extern void do_transmit(void);
@@ -37,6 +39,7 @@ extern "C" void boardram_set_reg_service(void (*cb)(void));
 #define MBX_RAM_REQ  0x8010
 #define MBX_RAM_RSP  0x8018
 #define MBX_INT_OFF  0x8020
+#define MBX_MAC_OFF  0x8028
 #define MAP_SIZE     0x10000
 
 static volatile sig_atomic_t running = 1;
@@ -64,6 +67,10 @@ static void *rx_thread(void *arg)
     (void)arg;
     static uint8_t rxbuf[MAX_PACKET_SIZE];
     while (running) {
+        if (registers_mode() & MODE_LOOP) {
+            usleep(1000);
+            continue;
+        }
         int len = ethernet_recv(rxbuf, sizeof rxbuf);
         if (len > 0)
             gotfunc(rxbuf, len);
@@ -72,6 +79,32 @@ static void *rx_thread(void *arg)
 }
 
 static int dbg_cnt = 0;
+static int last_mbx_int = -1;
+
+static void write_mbx_int(void)
+{
+    uint16_t csr0 = registers_csr0();
+    int val = (csr0 & CSR0_INTR && csr0 & CSR0_INEA) ? 1 : 0;
+    if (val != last_mbx_int) {
+        if (dbg_cnt < 2000)
+            fprintf(stderr, "[a2065d] write_mbx_int: %d→%d csr0=%04X\n", last_mbx_int, val, csr0);
+        wr64(MBX_INT_OFF, val);
+        last_mbx_int = val;
+    }
+}
+
+static void assert_mbx_int(void)
+{
+    wr64(MBX_INT_OFF, 1);
+    __sync_synchronize();
+    wr64(MBX_INT_OFF, 1);
+    __sync_synchronize();
+    wr64(MBX_INT_OFF, 1);
+    last_mbx_int = 1;
+    if (dbg_cnt < 2000)
+        fprintf(stderr, "[a2065d] assert_mbx_int()\n");
+}
+
 static void service_bridge(void)
 {
     uint64_t req = rd64(MBX_REQ_OFF);
@@ -86,21 +119,40 @@ static void service_bridge(void)
     if (!rw)
         result = chip_wget(addr);
 
-    if (dbg_cnt < 200)
+    if (dbg_cnt < 2000)
         fprintf(stderr, "[req %d] raw=0x%016llX rw=%d addr=%02X data=%04X rsp=%04X\n",
                 dbg_cnt, (unsigned long long)req, rw, addr, data, result);
     dbg_cnt++;
+
+    if (!rw && addr == 0 && (result & CSR0_INTR) && (result & CSR0_INEA))
+        assert_mbx_int();
 
     uint64_t rsp = 1 | ((uint64_t)result << 1);
     wr64(MBX_RSP_OFF, rsp);
     __sync_synchronize();
     wr64(MBX_REQ_OFF, 0);
 
-    if (rw)
+    if (rw) {
         chip_wput(addr, data);
+        uint16_t csr0 = registers_csr0();
+        if ((csr0 & CSR0_INTR) && (csr0 & CSR0_INEA))
+            assert_mbx_int();
+        else
+            write_mbx_int();
+    }
+}
 
-    uint16_t csr0 = registers_csr0();
-    wr64(MBX_INT_OFF, (csr0 & CSR0_INTR && csr0 & CSR0_INEA) ? 1 : 0);
+static void write_mbx_mac(const uint8_t *fakemac)
+{
+    uint64_t val = 1;
+    val |= ((uint64_t)fakemac[2]) << 32;
+    val |= ((uint64_t)fakemac[3]) << 40;
+    val |= ((uint64_t)fakemac[4]) << 48;
+    val |= ((uint64_t)fakemac[5]) << 56;
+    wr64(MBX_MAC_OFF, val);
+    fprintf(stderr, "[a2065d] MBX_MAC written: %02X:%02X:%02X:%02X (raw=0x%016llX)\n",
+            fakemac[2], fakemac[3], fakemac[4], fakemac[5],
+            (unsigned long long)val);
 }
 
 static void daemon_set_default_mac(void)
@@ -142,8 +194,8 @@ static void service_bridge_safe(void)
     if (!rw)
         result = chip_wget(addr);
 
-    if (dbg_cnt < 200)
-        fprintf(stderr, "[req %d] raw=0x%016llX rw=%d addr=%02X data=%04X rsp=%04X\n",
+    if (dbg_cnt < 2000)
+        fprintf(stderr, "[req %d(safe)] raw=0x%016llX rw=%d addr=%02X data=%04X rsp=%04X\n",
                 dbg_cnt, (unsigned long long)req, rw, addr, data, result);
     dbg_cnt++;
 
@@ -157,9 +209,6 @@ static void service_bridge_safe(void)
             chip_wput(addr, data);
         }
     }
-
-    uint16_t csr0 = registers_csr0();
-    wr64(MBX_INT_OFF, (csr0 & CSR0_INTR && csr0 & CSR0_INEA) ? 1 : 0);
 }
 
 static int test_boardram(void)
@@ -306,13 +355,30 @@ int main(int argc, char *argv[])
 
     daemon_set_default_mac();
 
+    {
+        uint8_t fakemac[6];
+        registers_get_fakemac(fakemac);
+        write_mbx_mac(fakemac);
+    }
+
     pthread_t rx_tid;
     pthread_create(&rx_tid, NULL, rx_thread, NULL);
+
+    int int_refresh = 0;
 
     fprintf(stderr, "[a2065d DDR3] Running — servicing DDR3 mailbox requests\n");
 
     while (running) {
         service_bridge();
+        if (last_mbx_int == 1) {
+            int_refresh++;
+            if (int_refresh >= 10) {
+                wr64(MBX_INT_OFF, 1);
+                int_refresh = 0;
+            }
+        } else {
+            int_refresh = 0;
+        }
     }
 
     wr64(MBX_INT_OFF, 0);
