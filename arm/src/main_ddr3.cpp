@@ -14,16 +14,19 @@
 #include <arpa/inet.h>
 
 extern void registers_reset(void);
+extern void registers_lock_init(void);
+extern void registers_lock(void);
+extern void registers_unlock(void);
 extern void registers_set_boardram(volatile uint8_t *ram);
 extern void registers_set_fakemac(const uint8_t *mac);
 extern void registers_get_fakemac(uint8_t *out);
 extern void registers_set_on_interrupt(void (*fn)(void));
-extern void registers_set_on_transmit(void (*fn)(void));
+extern void registers_set_on_transmit(int (*fn)(void));
 extern uint16_t registers_csr0(void);
 extern uint16_t registers_mode(void);
 extern uint16_t chip_wget(uint8_t reg_offset);
 extern void chip_wput(uint8_t reg_offset, uint16_t v);
-extern void do_transmit(void);
+extern int  do_transmit(void);
 extern void gotfunc(const uint8_t *data, int len);
 extern void mac_set_addresses(const uint8_t *fake, const uint8_t *real);
 extern int  ethernet_open(const char *iface, int promiscuous);
@@ -57,41 +60,18 @@ static void wr64(unsigned long off, uint64_t val) {
     memcpy((void *)(map + off), &val, 8);
 }
 
-static void handle_signal(int sig) { (void)sig; running = 0; ethernet_close(); }
-
-static void on_interrupt_cb(void) {}
-static void on_transmit_cb(void) { do_transmit(); }
-
-static void *rx_thread(void *arg)
-{
-    (void)arg;
-    static uint8_t rxbuf[MAX_PACKET_SIZE];
-    while (running) {
-        if (registers_mode() & MODE_LOOP) {
-            usleep(1000);
-            continue;
-        }
-        int len = ethernet_recv(rxbuf, sizeof rxbuf);
-        if (len > 0)
-            gotfunc(rxbuf, len);
-    }
-    return NULL;
-}
+static void handle_signal(int sig) { (void)sig; running = 0; }
 
 static int dbg_cnt = 0;
 static int last_mbx_int = -1;
+static int int_hold = 0;
+#define INT_HOLD_ITER 100
+static volatile int deferred_csr0_queue[8];
+static volatile int deferred_csr0_head = 0;
+static volatile int deferred_csr0_tail = 0;
+static int tdmd_retry = 0;
+static void schedule_tdmd_retry(void) { if (tdmd_retry < 16) tdmd_retry = 16; }
 
-static void write_mbx_int(void)
-{
-    uint16_t csr0 = registers_csr0();
-    int val = (csr0 & CSR0_INTR && csr0 & CSR0_INEA) ? 1 : 0;
-    if (val != last_mbx_int) {
-        if (dbg_cnt < 2000)
-            fprintf(stderr, "[a2065d] write_mbx_int: %d→%d csr0=%04X\n", last_mbx_int, val, csr0);
-        wr64(MBX_INT_OFF, val);
-        last_mbx_int = val;
-    }
-}
 
 static void assert_mbx_int(void)
 {
@@ -101,8 +81,45 @@ static void assert_mbx_int(void)
     __sync_synchronize();
     wr64(MBX_INT_OFF, 1);
     last_mbx_int = 1;
-    if (dbg_cnt < 2000)
+    int_hold = INT_HOLD_ITER;
+    if (dbg_cnt < 10000)
         fprintf(stderr, "[a2065d] assert_mbx_int()\n");
+}
+
+static void on_interrupt_cb(void) { assert_mbx_int(); }
+static int on_transmit_cb(void) {
+    int r = do_transmit();
+    if (!r) schedule_tdmd_retry();
+    return r;
+}
+
+static void *rx_thread(void *arg)
+{
+    (void)arg;
+    static uint8_t rxbuf[MAX_PACKET_SIZE];
+    while (running) {
+        int len = ethernet_recv(rxbuf, sizeof rxbuf);
+        if (len > 0) {
+            registers_lock();
+            gotfunc(rxbuf, len);
+            registers_unlock();
+        }
+    }
+    return NULL;
+}
+
+static void write_mbx_int(void)
+{
+    registers_lock();
+    uint16_t csr0 = registers_csr0();
+    registers_unlock();
+    int val = (csr0 & CSR0_INTR && csr0 & CSR0_INEA) ? 1 : 0;
+    if (val != last_mbx_int) {
+        if (dbg_cnt < 10000)
+            fprintf(stderr, "[a2065d] write_mbx_int: %d→%d csr0=%04X\n", last_mbx_int, val, csr0);
+        wr64(MBX_INT_OFF, val);
+        last_mbx_int = val;
+    }
 }
 
 static void service_bridge(void)
@@ -116,29 +133,54 @@ static void service_bridge(void)
     uint16_t data = (req >> 10) & 0xFFFF;
 
     uint16_t result = 0;
-    if (!rw)
+    if (!rw) {
+        registers_lock();
         result = chip_wget(addr);
+        registers_unlock();
+    }
 
-    if (dbg_cnt < 2000)
+    if (dbg_cnt < 10000)
         fprintf(stderr, "[req %d] raw=0x%016llX rw=%d addr=%02X data=%04X rsp=%04X\n",
                 dbg_cnt, (unsigned long long)req, rw, addr, data, result);
     dbg_cnt++;
 
-    if (!rw && addr == 0 && (result & CSR0_INTR) && (result & CSR0_INEA))
+    if (!rw && addr == 0 && (result & CSR0_INTR) && (result & CSR0_INEA)) {
         assert_mbx_int();
+    }
+
+    if (rw && addr == 0 && (data & (CSR0_INIT | CSR0_TDMD | CSR0_STRT))) {
+        registers_lock();
+        uint16_t cur_csr0 = registers_csr0();
+        registers_unlock();
+        if ((data | cur_csr0) & CSR0_INEA) {
+            assert_mbx_int();
+            if (data & CSR0_INIT)
+                usleep(500);
+            else
+                usleep(100);
+        }
+    }
 
     uint64_t rsp = 1 | ((uint64_t)result << 1);
     wr64(MBX_RSP_OFF, rsp);
     __sync_synchronize();
     wr64(MBX_REQ_OFF, 0);
+    __sync_synchronize();
+    (void)rd64(MBX_REQ_OFF);
 
     if (rw) {
+        registers_lock();
         chip_wput(addr, data);
-        uint16_t csr0 = registers_csr0();
-        if ((csr0 & CSR0_INTR) && (csr0 & CSR0_INEA))
+        int do_init_delay = (addr == 0 && (data & CSR0_INIT) && (registers_csr0() & CSR0_INTR));
+        int int_cleared = (addr == 0 && !(registers_csr0() & CSR0_INTR));
+        registers_unlock();
+        if (do_init_delay) {
             assert_mbx_int();
-        else
-            write_mbx_int();
+            usleep(500);
+        }
+        if (int_cleared && int_hold > 0) {
+            int_hold = 1;
+        }
     }
 }
 
@@ -191,10 +233,13 @@ static void service_bridge_safe(void)
     uint16_t data = (req >> 10) & 0xFFFF;
 
     uint16_t result = 0;
-    if (!rw)
+    if (!rw) {
+        registers_lock();
         result = chip_wget(addr);
+        registers_unlock();
+    }
 
-    if (dbg_cnt < 2000)
+    if (dbg_cnt < 10000)
         fprintf(stderr, "[req %d(safe)] raw=0x%016llX rw=%d addr=%02X data=%04X rsp=%04X\n",
                 dbg_cnt, (unsigned long long)req, rw, addr, data, result);
     dbg_cnt++;
@@ -203,10 +248,22 @@ static void service_bridge_safe(void)
     wr64(MBX_RSP_OFF, rsp);
     __sync_synchronize();
     wr64(MBX_REQ_OFF, 0);
+    __sync_synchronize();
+    (void)rd64(MBX_REQ_OFF);
 
     if (rw) {
         if (addr == A2065_RAP_OFF) {
+            registers_lock();
             chip_wput(addr, data);
+            registers_unlock();
+        } else if (addr == 0) {
+            int next = (deferred_csr0_head + 1) % 8;
+            if (next != deferred_csr0_tail) {
+                deferred_csr0_queue[deferred_csr0_head] = data;
+                deferred_csr0_head = next;
+            }
+            if (dbg_cnt < 10000)
+                fprintf(stderr, "[req %d(safe)] deferred CSR0 write: %04X\n", dbg_cnt - 1, data);
         }
     }
 }
@@ -319,13 +376,16 @@ int main(int argc, char *argv[])
 
     memset(local_boardram, 0, sizeof(local_boardram));
 
-    wr64(MBX_RSP_OFF, 1);
-    usleep(2000);
-    wr64(MBX_REQ_OFF, 0);
-    wr64(MBX_RSP_OFF, 0);
-    wr64(MBX_RAM_REQ, 0);
-    wr64(MBX_RAM_RSP, 0);
-    wr64(MBX_INT_OFF, 0);
+    for (int i = 0; i < 5; i++) {
+        wr64(MBX_RSP_OFF, 1);
+        usleep(10000);
+        wr64(MBX_RSP_OFF, 0);
+        wr64(MBX_REQ_OFF, 0);
+        wr64(MBX_RAM_REQ, 0);
+        wr64(MBX_RAM_RSP, 0);
+        wr64(MBX_INT_OFF, 0);
+        usleep(10000);
+    }
 
     boardram_remote_init(map);
     boardram_set_reg_service(service_bridge_safe);
@@ -344,6 +404,7 @@ int main(int argc, char *argv[])
         return rc;
     }
 
+    registers_lock_init();
     registers_reset();
     registers_set_boardram(local_boardram);
     registers_set_on_interrupt(on_interrupt_cb);
@@ -362,7 +423,12 @@ int main(int argc, char *argv[])
     }
 
     pthread_t rx_tid;
-    pthread_create(&rx_tid, NULL, rx_thread, NULL);
+    if (pthread_create(&rx_tid, NULL, rx_thread, NULL) != 0) {
+        perror("[a2065d] pthread_create");
+        munmap((void *)map, MAP_SIZE);
+        close(ddr3_fd);
+        return 1;
+    }
 
     int int_refresh = 0;
 
@@ -370,6 +436,40 @@ int main(int argc, char *argv[])
 
     while (running) {
         service_bridge();
+
+        while (deferred_csr0_tail != deferred_csr0_head) {
+            int saved = deferred_csr0_queue[deferred_csr0_tail];
+            deferred_csr0_tail = (deferred_csr0_tail + 1) % 8;
+            registers_lock();
+            chip_wput(0, saved);
+            int int_cleared = !(registers_csr0() & CSR0_INTR);
+            registers_unlock();
+            if (int_cleared && int_hold > 0)
+                int_hold = 1;
+        }
+
+        if (tdmd_retry > 0) {
+            tdmd_retry--;
+            registers_lock();
+            uint16_t csr0 = registers_csr0();
+            registers_unlock();
+            if (csr0 & CSR0_TXON) {
+                registers_lock();
+                int r = do_transmit();
+                registers_unlock();
+                if (r)
+                    tdmd_retry = 0;
+            } else {
+                tdmd_retry = 0;
+            }
+        }
+
+        if (int_hold > 0) {
+            int_hold--;
+        } else {
+            write_mbx_int();
+        }
+
         if (last_mbx_int == 1) {
             int_refresh++;
             if (int_refresh >= 10) {
@@ -383,8 +483,8 @@ int main(int argc, char *argv[])
 
     wr64(MBX_INT_OFF, 0);
     running = 0;
-    pthread_join(rx_tid, NULL);
     ethernet_close();
+    pthread_join(rx_tid, NULL);
     munmap((void *)map, MAP_SIZE);
     close(ddr3_fd);
 

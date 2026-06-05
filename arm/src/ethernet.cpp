@@ -36,6 +36,7 @@ int ethernet_open(const char *iface, int promiscuous)
     }
 
     strncpy(ifr.ifr_name, iface, IFNAMSIZ - 1);
+    ifr.ifr_name[IFNAMSIZ - 1] = '\0';
     if (ioctl(sock_fd, SIOCGIFINDEX, &ifr) < 0) {
         perror("[a2065] SIOCGIFINDEX");
         close(sock_fd); sock_fd = -1;

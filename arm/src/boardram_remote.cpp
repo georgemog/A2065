@@ -37,6 +37,7 @@ extern "C" void boardram_set_reg_service(void (*cb)(void))
 
 static uint16_t boardram_xfer(uint16_t off, int write, uint16_t wdata)
 {
+    if (!map) return 0xFFFF;
     uint64_t req = 1 | ((uint64_t)write << 1)
                  | ((uint64_t)(off & 0x7FFE) << 2)
                  | ((uint64_t)wdata << 17);

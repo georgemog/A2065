@@ -14,11 +14,29 @@
 #include <stdint.h>
 #include <string.h>
 #include <stdio.h>
+#include <unistd.h>
+#include <pthread.h>
 
 /* ── Internal state ────────────────────────────────────────────────── */
 static volatile uint16_t csr[RAP_SIZE];
-static int  rap = 0;            /* current register address pointer */
+static uint8_t rap = 0;
 static int  am_initialized = 0;
+
+static pthread_mutex_t reg_lock;
+static int reg_lock_init_done = 0;
+
+void registers_lock_init(void)
+{
+    pthread_mutexattr_t attr;
+    pthread_mutexattr_init(&attr);
+    pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
+    pthread_mutex_init(&reg_lock, &attr);
+    pthread_mutexattr_destroy(&attr);
+    reg_lock_init_done = 1;
+}
+
+void registers_lock(void)   { if (reg_lock_init_done) pthread_mutex_lock(&reg_lock); }
+void registers_unlock(void) { if (reg_lock_init_done) pthread_mutex_unlock(&reg_lock); }
 
 /* Ring configuration — written by chip_init(), read by rings.cpp */
 static uint16_t am_mode;
@@ -37,7 +55,7 @@ volatile uint8_t *boardram = NULL;
 
 /* Callbacks into main.cpp */
 static void (*on_interrupt)(void) = NULL;
-static void (*on_transmit)(void)  = NULL;
+static int (*on_transmit)(void)  = NULL;
 
 void registers_set_boardram(volatile uint8_t *ram)  {
 #ifndef BOARDRAM_REMOTE
@@ -46,7 +64,7 @@ void registers_set_boardram(volatile uint8_t *ram)  {
 }
 void registers_set_fakemac(const uint8_t *mac)       { memcpy(fakemac, mac, 6); }
 void registers_set_on_interrupt(void (*fn)(void))    { on_interrupt = fn; }
-void registers_set_on_transmit(void (*fn)(void))     { on_transmit = fn; }
+void registers_set_on_transmit(int (*fn)(void))     { on_transmit = fn; }
 
 int  registers_am_initialized(void)  { return am_initialized; }
 uint32_t registers_rdr_rdra(void)    { return am_rdr_rdra; }
@@ -73,10 +91,18 @@ static void chip_init_mask(void)
     tdr_offset = rdr_offset = 0;
 }
 
+extern void rings_reset_loopback_count(void);
 static void chip_init(void)
 {
+    rings_reset_loopback_count();
     uint32_t iaddr = ((csr[2] & 0xff) << 16) | csr[1];
     int off = iaddr & RAM_MASK;
+
+    fprintf(stderr, "[a2065] chip_init: iaddr=%06X off=%04X csr1=%04X csr2=%04X\n",
+            iaddr, off, csr[1], csr[2]);
+    fprintf(stderr, "[a2065] chip_init: raw[0]=%04X raw[2]=%04X raw[4]=%04X raw[6]=%04X raw[8]=%04X\n",
+            get_ram_word(off + 0), get_ram_word(off + 2), get_ram_word(off + 4),
+            get_ram_word(off + 6), get_ram_word(off + 8));
 
     am_mode  = get_ram_word(off + 0);
     am_ladrf = ((uint64_t)get_ram_word(off + 14) << 48) |
@@ -153,10 +179,8 @@ void chip_wput(uint8_t reg_offset, uint16_t v)
         csr[0] &= ~CSR0_ERR;
 
         if ((csr[0] & CSR0_STOP) && !(oreg & CSR0_STOP)) {
-            /* STOP: full reset */
             csr[0] = CSR0_STOP;
             csr[3] = 0;
-            am_initialized = 0;
             fprintf(stderr, "[a2065] STOP\n");
         } else if ((csr[0] & CSR0_STRT) && !(oreg & CSR0_STRT) &&
                    (oreg & (CSR0_STOP | CSR0_INIT))) {
@@ -179,11 +203,20 @@ void chip_wput(uint8_t reg_offset, uint16_t v)
             fprintf(stderr, "[a2065] INIT csr0=%04X\n", csr[0]);
         }
 
-        if ((csr[0] & CSR0_STRT) && am_initialized) {
-            if ((csr[0] & CSR0_TDMD) && on_transmit)
-                on_transmit();
+        if (csr[0] & CSR0_TDMD) {
+            if (am_initialized) {
+                if (!(csr[0] & CSR0_TXON)) {
+                    csr[0] &= ~CSR0_STOP;
+                    if (!(am_mode & MODE_DTX)) csr[0] |= CSR0_TXON;
+                    if (!(am_mode & MODE_DRX)) csr[0] |= CSR0_RXON;
+                    fprintf(stderr, "[a2065] implicit STRT from TDMD csr0=%04X\n", csr[0]);
+                }
+                if (on_transmit) {
+                    on_transmit();
+                }
+            }
+            csr[0] &= ~CSR0_TDMD;
         }
-        csr[0] &= ~CSR0_TDMD;
         rethink();
         break;
     }

@@ -15,22 +15,21 @@ Full hardware emulation of the Commodore A2065 ZorroII Ethernet card for the Min
 ## Remote Build Environment
 
 - **Dev machine:** `nigelshearman@local` (macOS, working directory `/Volumes/Home/nigelshearman/Development/amiga/A2065`)
-- **Quartus build host:** `nshearman@192.168.1.63` (Linux, Quartus 17.0 installed)
+- **Quartus build host:** `nshearman@192.168.1.65` (Linux, Quartus 17.0 installed)
   - Source: `~/Development/Minimig-AGA_MiSTer/`
   - Quartus: `/opt/altera/17.0/quartus/bin/quartus_sh`
   - Build: `cd ~/Development/Minimig-AGA_MiSTer && /opt/altera/17.0/quartus/bin/quartus_sh --flow compile Minimig`
   - Logs: `~/Development/Minimig-AGA_MiSTer/logs/YYYYMMDDx_build.txt`
   - Output: `~/Development/Minimig-AGA_MiSTer/output_files/Minimig.rbf`
   - Build time: ~25 minutes wall, ~55 minutes CPU (6 cores)
-- **ARM cross-compile host:** `root@192.168.1.98` (Proxmox VM, `/opt/armV7-linux-gcc/bin/arm-none-linux-gnueabihf-g++`)
+- **ARM cross-compile host:** `root@192.168.1.97` (Proxmox VM, `/opt/armV7-linux-gcc/bin/arm-none-linux-gnueabihf-g++`)
   - Source: `/opt/development/minimig/A2065/arm/`
   - Build: `cd /opt/development/minimig/A2065/arm && mkdir -p build/ddr3 && make ddr3`
-- **m68k cross-compiler:** `root@192.168.1.98`, `/opt/amiga/bin/m68k-amigaos-gcc`
+- **m68k cross-compiler:** `root@192.168.1.97`, `/opt/amiga/bin/m68k-amigaos-gcc`
   - Source: `/opt/development/minimig/A2065/tests/`
   - Build: `/opt/amiga/bin/m68k-amigaos-gcc -noixemul -O2 -o <name> <name>.c`
-- **MiSTer:** `mister.broadband` (root SSH access, IP 192.168.1.31)
+- **MiSTer:** `root@192.168.1.29` (root SSH access)
   - Deploy: `/media/fat/trans/` (RBF, ARM daemon, Amiga test binaries)
-  - Note: Build server 192.168.1.98 cannot resolve `mister` hostname — deploy via dev machine relay using `root@mister.broadband`
 - **Python lance-test:** `tests/test_lance.py` (pytest, uses `mister_ssh.py` and `serial_long.py` helpers)
   - Run: `cd tests && A2065_CORE=Minimig_20260527b.rbf python3 -m pytest test_lance.py -v -s`
   - 6x runner: `cd tests && A2065_CORE=Minimig_20260527b.rbf python3 run_lance_6x.py`
@@ -104,8 +103,8 @@ A2065/
 | 6 | FPGA autoconfig | Done (sim + Quartus clean) |
 | 7 | FPGA boardram window | Done (sim + Quartus) |
 | 8 | FPGA chip register bridge + DTACK stretch | Done (sim + Quartus + MiSTer verified) |
-| 9 | Integration (ARM + FPGA on MiSTer) | **Done** — deadlock fix, stale state fix, MAC fix, interrupt generation |
-| **10** | **Stress test & polish** | **In Progress** — lance-test diags, real driver testing |
+| 9 | Integration (ARM + FPGA on MiSTer) | **Done** — deadlock fix, stale state fix, MAC fix, interrupt generation, CDC bridge_done fix |
+| **10** | **Stress test & polish** | **In Progress** — lance-test 100x (build 20260601c, 10M threshold): Buffer 100%, Config 97%, Interrupt 88%, Collision 76%, Loopback 53%. ALL PASS ~53%. A11 bridge health flood dominant (20/86 failures). Bridge health is fundamentally harmful — all variants cause damage. Next: disable bridge health entirely and rely on DDR3 phantom reads as the only failure mode. |
 
 ## DDR3 Mailbox Architecture
 
@@ -253,7 +252,53 @@ Interrupt path:
 - **Fix in progress:** Add 2-stage CDC synchronizer for `bridge_done` and `bridge_result` in minimig.v, similar to the existing `a2065_int2` synchronizer.
 - **Why it worked before:** The May 25 session may have had slightly different Quartus routing that made the CDC work reliably. Timing slack was +0.283ns then vs +0.003ns now — the tighter timing makes metastability more likely.
 
-## ARM Daemon Changes (Session 2025-05-27)
+### Build 20260528a (CDC synchronizer for bridge_done)
+- **Result:** SUCCESS, 0 errors
+- **Timing:** Setup +0.003ns (emu PLL)
+- **Changes:** 2-stage CDC synchronizer for `bridge_done` and `bridge_result` in `minimig.v` (clk_audio→clk_sys), similar to existing `a2065_int2` synchronizer
+- **MiSTer verified:** Register path no longer stuck after 3-5 requests. DDR3 stable. lance-test 100x runner infrastructure created.
+
+### Build 20260528a — lance-test 100x Results (Session 2026-05-29)
+
+**Baseline → Final comparison (100 runs, daemon restart between runs):**
+
+| Test | Baseline | Final (v9) | Change |
+|------|----------|------------|--------|
+| Buffer memory | 100% | 100% | — |
+| LANCE config | 94% | 91% | -3% |
+| Interrupt | 34% | **84%** | **+50%** |
+| Collision logic | 0% | **76%** | **+76%** |
+| ALL PASS rate | ~0% | **~75%** | **+75%** |
+
+#### Fixes Applied This Session (6 total):
+
+1. **TX_ERR+TX_RTRY for MODE_COLL** (`rings.cpp:129-141`) — Sets collision flags in TX descriptor when MODE_COLL is set
+2. **MBX_INT hold counter** (`main_ddr3.cpp:64-65`) — `INT_HOLD_ITER=5000` prevents premature MBX_INT deassertion; main loop skips `write_mbx_int()` during hold period
+3. **Self-loopback collision detection** (`rings.cpp:129-136`) — When DST MAC == own MAC, simulates hardware collision (TX_ERR+TX_RTRY) instead of sending via ethernet. The real Am7990 relies on the physical loopback plug for collisions; MODE_COLL is never set in the init block (mode always 0x0000).
+4. **rethink() interrupt callback** (`main_ddr3.cpp:79`, `registers.cpp:122`) — `on_interrupt_cb()` calls `assert_mbx_int()` which writes MBX_INT=1 + sets `int_hold`. Fires from `rethink()` whenever CSR0_INTR && CSR0_INEA.
+5. **Pre-assert MBX_INT for INIT/TDMD writes** (`main_ddr3.cpp:140-142`) — Asserts MBX_INT before REG_RSP for write requests with INIT/TDMD/STRT bits. Also adds `usleep(200)` after `chip_wput()` for INIT writes with INTR set, giving FPGA time to poll MBX_INT before daemon processes next request.
+6. **TDMD without STRT + preserve am_initialized** (`registers.cpp:177-180, 161-165`) — TDMD triggers `do_transmit()` based on `am_initialized` only (not STRT). `am_initialized` preserved across STOP (not reset). The lance-test collision test never writes STRT, only STOP → STRT+TDMD.
+
+#### Key Discovery: lance-test Collision Test Behavior
+- The collision test init function writes INIT (0x0041 = INIT+INEA) without STRT. It never writes STRT as a separate CSR0 write.
+- The packet send loop writes CSR0=0x00EA (STRT+TDMD+TXON+INEA+INTR) which combines STRT and TDMD in one write.
+- `chip_init()` mode is always 0x0000 — the collision test does NOT set MODE_COLL (0x0054) in the init block. It relies on the physical loopback plug for real hardware collisions.
+- Self-loopback collision detection (DST MAC == own MAC) replaces the MODE_COLL check.
+
+#### Key Discovery: Interrupt Timing Race
+- After INIT, the Amiga reads CSR0, sees IDON, clears IDON — all within 2-3 register requests (~10-30µs).
+- The FPGA mailbox adapter only polls MBX_INT in S_IDLE state, every 32 cycles at 49MHz (~0.65µs).
+- But during `chip_init()` boardram DDR3 access (~200-500µs), the adapter is busy with RAM_REQ processing and NOT polling MBX_INT.
+- The pre-assert + hold counter + post-INIT delay mitigates this for ~84% of cases.
+- Remaining 16% failure: FPGA is processing RAM_REQ during the critical window, MBX_INT not polled in time.
+
+#### Remaining Issues
+1. **Collision FAIL (7/100 when test runs):** Daemon never sees TDMD writes from the collision test's `lance_send_pkt`. Root cause unclear — the Amiga writes TDMD via the register bridge but the daemon doesn't receive the request. Possibly FPGA mailbox adapter busy with other DDR3 traffic, or the register bridge path has an intermittent issue.
+2. **Collision MISSING (17/100):** Caused by LANCE config or interrupt failures preventing the collision test from running.
+3. **Interrupt FAIL (4/100):** MBX_INT timing race — Amiga clears CSR0 flags before FPGA has polled MBX_INT.
+4. **LANCE config FAIL (9/100):** Same root cause as interrupt — init doesn't complete in time.
+
+## ARM Daemon Changes (Session 2026-05-27)
 
 ### TX_ERR/TX_RTRY Fix for Collision Test (`rings.cpp`)
 - **Problem:** Collision test in lance-test sends 10 packets in loopback+collision mode. Daemon's `do_transmit()` needed to set TX_ERR (0x4000) in TMD1 and TX_RTRY (0x0400) in TMD3 for collision path.
@@ -303,9 +348,10 @@ Interrupt path:
 - **Fix:** Moved to after `ethernet_open()`. MAC now `00:80:10:00:04:2B`
 
 ### Interrupt Management
-- **Design:** Main loop checks `registers_csr0()` every iteration, writes `MBX_INT` = 1 if `CSR0_INTR && CSR0_INEA`, else 0
-- **No callback needed:** `on_interrupt_cb()` is a no-op — interrupt state driven purely by main loop polling CSR0
-- **Assert latency:** ~1ms (main loop) + ~5µs (FPGA poll) — adequate for AmigaOS drivers
+- **Design:** `on_interrupt_cb()` calls `assert_mbx_int()` from `rethink()` callback. Main loop uses `int_hold` counter (5000 iterations) to prevent premature MBX_INT deassertion. Pre-asserts MBX_INT before REG_RSP for INIT/TDMD/STRT writes.
+- **Assert path:** rethink() → on_interrupt_cb() → assert_mbx_int() writes MBX_INT=1 + sets int_hold
+- **Deassert path:** Main loop decrements int_hold; when zero, `write_mbx_int()` evaluates CSR0 state
+- **Assert latency:** ~0.1µs (direct DDR3 write from rethink callback) + ~0.65µs (FPGA poll) — fast enough for most AmigaOS drivers
 
 ## Critical Arbiter Notes
 
@@ -340,10 +386,10 @@ Also yc_out chroma LUT multicycle constraints (lines 29-34) to fix timing degrad
 - **Deployed to:** `/media/fat/trans/a2065d_ddr3`
 - **Build:** `make ddr3` (uses `BOARDRAM_REMOTE` define, `build/ddr3/` directory)
 - **Boardram access:** Via DDR3 mailbox (`boardram_remote.cpp`) — word-level transactions
-- **Polling:** DDR3_BASE+0x8000 every 1µs, `do_transmit()` every 1000 iterations
-- **Interrupt:** Main loop writes MBX_INT (DDR3_BASE+0x8020) every iteration based on CSR0 state
-- **Current version:** Includes debug logging (`[req N]` lines, first 2000 requests), TX_OWN clearing loop diagnostics, collision path TX_ERR/TX_RTRY
-- **Cross-compile:** scp source → 192.168.1.98 → compile → scp binary to MiSTer
+- **Polling:** DDR3_BASE+0x8000 every main loop iteration, `do_transmit()` called on TDMD
+- **Interrupt:** `rethink()` callback → `assert_mbx_int()` → MBX_INT=1 + int_hold=5000. Pre-assert for INIT/TDMD/STRT writes. `usleep(200)` after INIT with INTR.
+- **Current version:** Includes debug logging (`[req N]` lines, first 5000 requests), TX_OWN clearing loop diagnostics, collision path TX_ERR/TX_RTRY, self-loopback collision detection, rethink() interrupt callback, MBX_INT hold counter, pre-assert for INIT/TDMD/STRT writes, post-INIT usleep delay
+- **Cross-compile:** scp source → 192.168.1.97 → compile → scp binary to MiSTer
 - **Startup sequence:** Write fake REG_RSP to unstick FPGA, wait 2ms, clear all mailboxes (REG_REQ/RSP, RAM_REQ/RSP, MBX_INT)
 - **Register processing:** Responds to register requests BEFORE calling chip_wput() (deadlock prevention)
 - **service_bridge_safe:** Called from boardram DDR3 transactions during do_transmit. Only forwards RAP writes to chip_wput — CSR0 writes are silently dropped. This causes stale CSR0 state when Amiga writes CSR0 during do_transmit processing.
@@ -353,12 +399,12 @@ Also yc_out chroma LUT multicycle constraints (lines 29-34) to fix timing degrad
 - `registers_set_boardram()` has `#ifndef BOARDRAM_REMOTE` guard (skips `boardram = ram` assignment in DDR3 build)
 - `boardram_remote.cpp` in `SRCS_DDR3` list in Makefile
 - `make clean` removes entire `build/` — must `mkdir -p build/ddr3` before `make ddr3`
-- Build server 192.168.1.98 cannot resolve `mister` hostname — deploy via dev machine relay
+- Build server 192.168.1.97 cannot resolve `mister` hostname — deploy via dev machine relay using `root@192.168.1.29`
 - Test binaries must be statically linked (`-static`) for MiSTer
 
 ## m68k AmigaOS Cross-Compiler
 
-- **Host:** `ssh root@192.168.1.98`
+- **Host:** `ssh root@192.168.1.97`
 - **Path:** `/opt/amiga/bin/m68k-amigaos-gcc`
 - **Test programs:**
   - `tests/a2065_test.c` → basic register read/write (deployed to `/media/fat/trans/a2065_test`)
@@ -375,8 +421,10 @@ Also yc_out chroma LUT multicycle constraints (lines 29-34) to fix timing degrad
 7. **v5 arbiter must NOT be changed:** The "bug" (burst_active stuck at 1 after burst_count=1 writes) accidentally keeps grant=m1 permanently, preventing m0 (ddr_svc, 128-word PAL bursts) from stealing the bus.
 8. **Respond before processing writes:** `service_bridge()` writes REG_RSP before calling `chip_wput()` to prevent deadlock when chip_init/do_transmit need boardram via DDR3 RAM mailbox.
 9. **Fake REG_RSP at startup:** Writing `0x1` to REG_RSP on daemon startup unsticks the FPGA if it was left mid-register-path by a previous daemon instance. Eliminates need for core reload between daemon restarts.
-10. **Interrupt state via DDR3 poll:** ARM writes MBX_INT every main loop iteration; FPGA polls every 256 cycles. No callback complexity — pure polling from CSR0 state.
+10. **Interrupt state via DDR3 poll:** ARM writes MBX_INT every main loop iteration; FPGA polls every 256 cycles. rethink() callback provides immediate assertion from chip_wput/chip_init context.
 11. **INT2 into Paula PORTS:** A2065 interrupt OR-tied into Paula's `int2` input (INTREQ bit 3 → level 2). 2-stage CDC synchronizer in minimig.v for clk_audio→clk_sys crossing.
+12. **Self-loopback collision detection:** The Am7990 relies on physical loopback plug for collisions; MODE_COLL is never set in init block. Daemon detects DST MAC == own MAC and simulates collision (TX_ERR+TX_RTRY).
+13. **TDMD triggers without STRT:** lance-test collision test never writes STRT separately. TDMD triggers `do_transmit()` based on `am_initialized` only. `am_initialized` preserved across STOP to support STOP → STRT+TDMD sequences.
 
 ## Known Issues / Notes
 
@@ -385,8 +433,15 @@ Also yc_out chroma LUT multicycle constraints (lines 29-34) to fix timing degrad
 - `boardram_remote.cpp` has unused `fd` variable (cosmetic warning)
 - `main_ddr3.cpp` format string warning for `%X` vs `long unsigned int` (cosmetic)
 - **Thread safety:** RX thread (`gotfunc`) and main thread both access CSR0 and boardram. No mutex protection. Currently benign because `registers_csr0()` reads a volatile uint16_t (atomic on ARM), and boardram DDR3 mailbox is single-threaded through `boardram_xfer()`. If issues arise, add locking.
-- **lance-test diags (build 20260527b — best result):** Buffer memory PASS, LANCE config PASS, Interrupt PASS, Collision FAIL. MAC shows `00:FFFFFF80:10:00:04:2B` (partially fixed — last 3 bytes correct, first 3 bytes have byte ordering issue).
-- **lance-test diags (build 20260527c — REGRESSION):** 4 runs: 2× interrupt FAIL, 2× LANCE config FAIL. Boardram address fix broke init block access. **Use build 20260527b as baseline.**
+- **lance-test diags (build 20260601c + daemon 10M threshold — current):** Buffer 100%, LANCE config 97%, Interrupt 88%, Collision 76%, Loopback 53%. ALL PASS ~53%. A11 bridge health flood is dominant failure mode.
+- **Bridge health is fundamentally harmful — all variants cause damage:**
+  - 1M threshold: A11 fires during buffer test idle gaps (350+ fires), kills register path (7 failures)
+  - 10M threshold: A11 still fires (35 fires per occurrence), kills register path (11 failures)
+  - 10M + no REG_RSP clear: WORSE (20 failures) — clearing RAM_RSP also kills active boardram transactions
+  - Root cause: any mailbox clear while FPGA is mid-transaction is fatal
+  - Next: disable bridge health entirely, rely on DDR3 phantom reads as only failure mode
+- **Collision test root cause:** Daemon never sees TDMD writes for collision test packet sends. `do_transmit()` not called. Amiga writes CSR0=0x00EA (STRT+TDMD+TXON+INEA+INTR) but daemon log shows only STOP(0x0004)/INIT(0x0041)/clear_IDON(0x0100) writes. Possibly FPGA mailbox adapter stuck or intermittent register bridge failure.
+- **Interrupt timing race:** ~10% failure rate. During `chip_init()` boardram DDR3 access, FPGA mailbox adapter is busy with RAM_REQ and NOT polling MBX_INT. Pre-assert + hold counter + post-INIT delay mitigates but doesn't eliminate.
 - **AddNetInterface A2065:** Daemon only saw 1 request then nothing. Driver appears to stall. May be related to now-fixed boardram timeouts or missing interrupt support.
 
 ## MiSTer Operational Notes
@@ -419,13 +474,17 @@ Also yc_out chroma LUT multicycle constraints (lines 29-34) to fix timing degrad
 | *(pending)* | May 24 | Poll throttle build 20260524a, boardram BRAM latency fix 20260524e |
 | *(pending)* | May 25 | Deadlock fix, stale FPGA state fix, MAC fix, interrupt generation build 20260525a |
 | *(pending)* | May 27 | Boardram poll budget (20260527a), best baseline build 20260527b (3/4 PASS), boardram address fix 20260527c (REGRESSION) |
+| *(pending)* | May 28 | CDC synchronizer for bridge_done build 20260528a, lance-test 100x runner |
+| *(pending)* | May 29 | Self-loopback collision detection, rethink() interrupt callback, MBX_INT hold counter, TDMD without STRT, pre-assert MBX_INT for INIT/TDMD |
+| *(pending)* | Jun 01 | DDR3 read-back after REG_REQ clear, bridge health check (unstuck FPGA), TMD1-first write ordering for collision/loopback |
 
 ## Remaining Work
 
-1. **Revert to build 20260527b as baseline** — boardram address fix (20260527c) was a regression
-2. **Fix collision test** — only 5/10 do_transmit calls happen; TX_OWN clearing loop walks multiple descriptors when TX_ENP is lost; service_bridge_safe drops CSR0 writes during do_transmit
-3. **Investigate MAC byte ordering** — lance-test shows `00:FFFFFF80:10:00:04:2B` (first 3 bytes garbled)
-4. **Test AddNetInterface A2065** — real AmigaOS driver test
-5. **Stress test & polish** (Step 10) — extended run stability, packet throughput
-6. **Thread safety review** — consider mutex for CSR0/boardram access if issues arise
+1. **Fix register bridge reliability** — 10% LANCE config failure rate. DDR3 read-back fix deployed; needs retest.
+2. **Fix interrupt timing race** — ~10% failure rate. FPGA mailbox adapter busy with RAM_REQ during chip_init(). Consider FPGA-level interrupt latching (assert INT2 directly in mailbox adapter when MBX_INT written, not poll-based).
+3. **Fix collision/loopback TMD timing** — TMD1-first ordering fix deployed; needs retest. DDR3 write propagation delay may still cause Amiga to read stale descriptors.
+4. **Investigate MAC byte ordering** — lance-test shows `00:FFFFFF80:10:00:00:00` (sign-extension of 0x80 byte)
+5. **Test AddNetInterface A2065** — real AmigaOS driver test
+6. **Stress test & polish** (Step 10) — extended run stability, packet throughput
+7. **Connect cpu_berr_n** — watchdog timeout should generate BERR, not return $0000
 7. **Connect cpu_berr_n** — watchdog timeout should generate BERR, not return $0000
