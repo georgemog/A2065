@@ -74,6 +74,7 @@ uint32_t registers_tdr_tlen(void)    { return am_tdr_tlen; }
 int *    registers_tdr_offset(void)  { return &tdr_offset; }
 int *    registers_rdr_offset(void)  { return &rdr_offset; }
 uint16_t registers_csr0(void)        { return csr[0]; }
+uint16_t registers_csr(int n)        { return (n >= 0 && n < RAP_SIZE) ? csr[n] : 0; }
 void     registers_csr0_set(uint16_t v) { csr[0] |= v; }
 void     registers_csr0_clr(uint16_t v) { csr[0] &= ~v; }
 uint16_t registers_mode(void)        { return am_mode; }

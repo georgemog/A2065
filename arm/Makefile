@@ -22,6 +22,7 @@ LDFLAGS_LINUX = -lrt
 BUILD_NATIVE = build/native
 BUILD_ARM    = build/arm
 BUILD_DDR3   = build/ddr3
+BUILD_DOORBELL = build/doorbell
 
 SRCS = src/mac.cpp \
        src/registers.cpp \
@@ -40,16 +41,24 @@ SRCS_DDR3 = src/mac.cpp \
             src/boardram_remote.cpp \
             src/main_ddr3.cpp
 
-OBJS_NATIVE = $(patsubst src/%.cpp, $(BUILD_NATIVE)/%.o, $(SRCS))
-OBJS_ARM    = $(patsubst src/%.cpp, $(BUILD_ARM)/%.o, $(SRCS))
-OBJS_DDR3   = $(patsubst src/%.cpp, $(BUILD_DDR3)/%.o, $(SRCS_DDR3))
+SRCS_DOORBELL = src/mac.cpp \
+                src/registers.cpp \
+                src/rings.cpp \
+                src/ethernet.cpp \
+                src/crc32.cpp \
+                src/main_doorbell.cpp
+
+OBJS_NATIVE   = $(patsubst src/%.cpp, $(BUILD_NATIVE)/%.o, $(SRCS))
+OBJS_ARM      = $(patsubst src/%.cpp, $(BUILD_ARM)/%.o, $(SRCS))
+OBJS_DDR3     = $(patsubst src/%.cpp, $(BUILD_DDR3)/%.o, $(SRCS_DDR3))
+OBJS_DOORBELL = $(patsubst src/%.cpp, $(BUILD_DOORBELL)/%.o, $(SRCS_DOORBELL))
 
 TEST_SRCS = src/mac_test.cpp \
             src/csr_test.cpp \
             src/rings_test.cpp \
             src/bridge_test.cpp
 
-.PHONY: all native arm ddr3 test status clean deploy_ddr3 boardram_flat_test
+.PHONY: all native arm ddr3 doorbell test status clean deploy_ddr3 deploy_doorbell boardram_flat_test
 
 all: native
 
@@ -60,6 +69,8 @@ status: $(BUILD_ARM)/bridge_status
 arm: $(BUILD_ARM)/a2065d
 
 ddr3: $(BUILD_DDR3)/a2065d_ddr3
+
+doorbell: $(BUILD_DOORBELL)/a2065d_doorbell
 
 $(BUILD_NATIVE)/a2065d: $(OBJS_NATIVE)
 	@mkdir -p $(BUILD_NATIVE)
@@ -73,6 +84,10 @@ $(BUILD_DDR3)/a2065d_ddr3: $(OBJS_DDR3)
 	@mkdir -p $(BUILD_DDR3)
 	$(CROSS_CXX) $(CXXFLAGS_DDR3) $^ -o $@ $(LDFLAGS) $(LDFLAGS_LINUX)
 
+$(BUILD_DOORBELL)/a2065d_doorbell: $(OBJS_DOORBELL)
+	@mkdir -p $(BUILD_DOORBELL)
+	$(CROSS_CXX) $(CXXFLAGS_ARM) $^ -o $@ $(LDFLAGS) $(LDFLAGS_LINUX)
+
 $(BUILD_NATIVE)/%.o: src/%.cpp
 	@mkdir -p $(BUILD_NATIVE)
 	$(CXX) $(CXXFLAGS_NATIVE) -c $< -o $@
@@ -84,6 +99,10 @@ $(BUILD_ARM)/%.o: src/%.cpp
 $(BUILD_DDR3)/%.o: src/%.cpp
 	@mkdir -p $(BUILD_DDR3)
 	$(CROSS_CXX) $(CXXFLAGS_DDR3) -c $< -o $@
+
+$(BUILD_DOORBELL)/%.o: src/%.cpp
+	@mkdir -p $(BUILD_DOORBELL)
+	$(CROSS_CXX) $(CXXFLAGS_ARM) -c $< -o $@
 
 test: $(BUILD_NATIVE)/mac_test $(BUILD_NATIVE)/csr_test $(BUILD_NATIVE)/rings_test $(BUILD_NATIVE)/bridge_test $(BUILD_NATIVE)/boardram_flat_test
 	$(BUILD_NATIVE)/mac_test
@@ -127,6 +146,12 @@ deploy: arm
 deploy_ddr3: ddr3
 	@echo "Deploying DDR3 daemon to MiSTer..."
 	scp $(BUILD_DDR3)/a2065d_ddr3 root@mister:/media/fat/trans/a2065d_ddr3
+	ssh root@mister 'chmod +x /media/fat/trans/a2065d_ddr3'
+	@echo "Deploy complete."
+
+deploy_doorbell: doorbell
+	@echo "Deploying doorbell daemon to MiSTer..."
+	scp $(BUILD_DOORBELL)/a2065d_doorbell root@mister:/media/fat/trans/a2065d_ddr3
 	ssh root@mister 'chmod +x /media/fat/trans/a2065d_ddr3'
 	@echo "Deploy complete."
 

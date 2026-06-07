@@ -47,4 +47,3 @@ static inline void ram_write_block(uint32_t off, const uint8_t *src, int len) {
 #endif
 
 #endif
-
