@@ -49,7 +49,7 @@ TEST_SRCS = src/mac_test.cpp \
             src/rings_test.cpp \
             src/bridge_test.cpp
 
-.PHONY: all native arm ddr3 test status clean deploy_ddr3
+.PHONY: all native arm ddr3 test status clean deploy_ddr3 boardram_flat_test
 
 all: native
 
@@ -85,11 +85,19 @@ $(BUILD_DDR3)/%.o: src/%.cpp
 	@mkdir -p $(BUILD_DDR3)
 	$(CROSS_CXX) $(CXXFLAGS_DDR3) -c $< -o $@
 
-test: $(BUILD_NATIVE)/mac_test $(BUILD_NATIVE)/csr_test $(BUILD_NATIVE)/rings_test $(BUILD_NATIVE)/bridge_test
+test: $(BUILD_NATIVE)/mac_test $(BUILD_NATIVE)/csr_test $(BUILD_NATIVE)/rings_test $(BUILD_NATIVE)/bridge_test $(BUILD_NATIVE)/boardram_flat_test
 	$(BUILD_NATIVE)/mac_test
 	$(BUILD_NATIVE)/csr_test
 	$(BUILD_NATIVE)/rings_test
 	$(BUILD_NATIVE)/bridge_test
+	$(BUILD_NATIVE)/boardram_flat_test
+
+boardram_flat_test: $(BUILD_NATIVE)/boardram_flat_test
+	$(BUILD_NATIVE)/boardram_flat_test
+
+$(BUILD_NATIVE)/boardram_flat_test: src/boardram_flat_test.cpp
+	@mkdir -p $(BUILD_NATIVE)
+	$(CXX) $(CXXFLAGS_NATIVE) $< -o $@
 
 $(BUILD_NATIVE)/mac_test: src/mac.cpp src/mac_test.cpp
 	@mkdir -p $(BUILD_NATIVE)
