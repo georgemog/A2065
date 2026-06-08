@@ -8,9 +8,11 @@ Full hardware emulation of the Commodore A2065 ZorroII Ethernet card for the Min
 
 ## Architecture Split
 
-- **FPGA fabric:** Autoconfig, 32KB dual-port BRAM (68k + ARM via DDR3 mailbox), register bridge (DTACK-stretch with ARM daemon via DDR3 mailbox), interrupt generation (INT2 via DDR3 mailbox)
-- **ARM Linux daemon:** Am7990 CSR state machine, TX/RX ring walker, raw Ethernet socket (AF_PACKET), boardram access via DDR3 mailbox, interrupt state management
-- **Bridge:** DDR3 shared-memory mailbox via f2sdram2 Avalon port (HPS2FPGA AXI bridge abandoned — non-functional on MiSTer)
+- **FPGA fabric:** Autoconfig, flat DDR3 boardram window (68k via DDR3 mailbox), CSR regfile + doorbell (zero-latency reads, async writes to ARM), interrupt generation (INT2 via DDR3 CSR slot)
+- **ARM Linux daemon:** Am7990 CSR state machine, TX/RX ring walker, raw Ethernet socket (AF_PACKET), boardram access via DDR3 flat window, interrupt state management via CSR shadow
+- **Bridge:** DDR3 shared-memory via f2sdram2 Avalon port (HPS2FPGA AXI bridge abandoned — non-functional on MiSTer). Two architectures:
+  - **Old bridge (branch main):** `a2065_registers.v` with DTACK-stretch + DDR3 mailbox CMD/RSP protocol, `a2065_boardram.v` with TDP BRAM, `a2065d_ddr3` daemon
+  - **New doorbell (branch `simplification/flat-ddr3-doorbell`):** `a2065_regfile.v` with zero-latency CSR reads + doorbell writes, `a2065_ddram.v` with flat DDR3 window, `a2065d_doorbell` daemon
 
 ## Remote Build Environment
 
@@ -31,11 +33,11 @@ Full hardware emulation of the Commodore A2065 ZorroII Ethernet card for the Min
 - **MiSTer:** `root@192.168.1.29` (root SSH access)
   - Deploy: `/media/fat/trans/` (RBF, ARM daemon, Amiga test binaries)
 - **Python lance-test:** `tests/test_lance.py` (pytest, uses `mister_ssh.py` and `serial_long.py` helpers)
-  - Run: `cd tests && A2065_CORE=Minimig_20260527b.rbf python3 -m pytest test_lance.py -v -s`
-  - 6x runner: `cd tests && A2065_CORE=Minimig_20260527b.rbf python3 run_lance_6x.py`
+  - Run: `cd tests && python3 -m pytest test_lance.py -v -s`
   - Core env var: `A2065_CORE` specifies which RBF to load
-  - lance-test binary: Pre-compiled Amiga binary at `/Volumes/Home/nigelshearman/Development/amiga/lance-test/`
-  - Disassembly: `/Volumes/Home/nigelshearman/Development/amiga/lance-test/lance_disasm.txt`
+  - Daemon env var: `A2065_DAEMON` specifies daemon path (default: doorbell)
+  - lance-test binary: Pre-compiled Amiga binary at `share:lance-test` on Amiga filesystem
+  - Disassembly: `lance-test/lance_disasm.txt`
 
 ## Directory Structure
 
@@ -71,8 +73,8 @@ A2065/
 │   ├── sim/                tb_autoconfig.v, tb_boardram.v (passing), tb_bridge_e2e.v (WIP)
 │   └── constraints/        a2065.sdc (timing constraints)
 ├── Minimig-AGA_MiSTer/     Git submodule — upstream Minimig core (modified for A2065)
-│   ├── rtl/A2065/          a2065_registers.v, a2065_boardram.v, a2065_ddr3_mailbox.v, avalon_arbiter.v
-│   ├── rtl/minimig.v       Boardram + registers instantiation, BRAM port wiring, CDC for INT2
+│   ├── rtl/A2065/          a2065_regfile.v, a2065_ddram.v, a2065_ddr3_mailbox.v, avalon_arbiter.v
+│   ├── rtl/minimig.v       Regfile + ddram instantiation, nrdy OR-tie, data bus OR-tie, CDC for INT2
 │   ├── sys/sys_top.v       Mailbox adapter instance, arbiter, f2sdram2 connection, interrupt wiring
 │   └── Minimig.sv          emu module — A2065 BRAM/bridge/INT2 ports pass-through
 ├── reference/              Amiberry source files for reference during porting
@@ -84,7 +86,7 @@ A2065/
 ### Files Modified in Minimig-AGA_MiSTer submodule:
 - **cpu_wrapper.v** — A2065 autoconfig nibbles added (type=0xC1, product=0x70, mfr=0x0202), base address latched from 0xE80048, `a2065_ena` driven from `~ac_a2065`. Nibbles 0-1 raw (er_Type), nibbles 2+ inverted.
 - **gary.v** — `sel_a2065 = a2065_ena && cpu_address_in[23:16]==a2065_base`
-- **minimig.v** — `a2065_boardram` instantiated, `a2065_registers` instantiated (DTACK-stretch via bridge `nrdy`), data mux OR-tied into CPU data bus. BRAM Port B wired to mailbox adapter (input ports for addr/wdata/wr/be, output for rdata). **Interrupt:** 2-stage CDC synchronizer for `a2065_int2` (clk_audio→clk_sys), OR-tied into Paula's `int2` input alongside CIA-A and IDE/Gayle.
+- **minimig.v** — `a2065_ddram` instantiated (DDR3 boardram window with DTACK stretch), `a2065_regfile` instantiated (zero-latency CSR reads + doorbell writes, `regs_nrdy=0`), data mux OR-tied into CPU data bus. **Interrupt:** 2-stage CDC synchronizer for `a2065_int2` (clk_audio→clk_sys), OR-tied into Paula's `int2` input alongside CIA-A and IDE/Gayle.
 - **Minimig.sv (emu)** — A2065 BRAM, bridge, and INT2 ports added as pass-through between sys_top.v and minimig.v
 - **sys_top.v** — `a2065_ddr3_mailbox` instantiated (clk_audio domain), `avalon_arbiter` for f2sdram2 sharing (ddr_svc m0 + A2065 mailbox m1), boardram Port B signals wired to mailbox adapter. `a2065_mailbox_int2` wired from mailbox to emu module.
 - **files.qip** — Added A2065 Verilog files
@@ -103,14 +105,58 @@ A2065/
 | 6 | FPGA autoconfig | Done (sim + Quartus clean) |
 | 7 | FPGA boardram window | Done (sim + Quartus) |
 | 8 | FPGA chip register bridge + DTACK stretch | Done (sim + Quartus + MiSTer verified) |
-| 9 | Integration (ARM + FPGA on MiSTer) | **Done** — deadlock fix, stale state fix, MAC fix, interrupt generation, CDC bridge_done fix |
-| **10** | **Stress test & polish** | **In Progress** — lance-test 100x (build 20260601c, 10M threshold): Buffer 100%, Config 97%, Interrupt 88%, Collision 76%, Loopback 53%. ALL PASS ~53%. A11 bridge health flood dominant (20/86 failures). Bridge health is fundamentally harmful — all variants cause damage. Next: disable bridge health entirely and rely on DDR3 phantom reads as the only failure mode. |
+| 9 | Integration (ARM + FPGA on MiSTer) | **Done** — old bridge: deadlock fix, stale state fix, MAC fix, interrupt generation, CDC bridge_done fix |
+| **10** | **Doorbell architecture** | **In Progress** — build 20260608h: lance-test **Buffer memory test PASS** (was FAIL). Root cause: ddram captured request on raw `sel_br` before strobes/data valid; fixed with AS+DS qualification + `cpu_rw`. Boardram word path proven. Remaining: byte-granular RMW, CSR0 IDON/LANCE config. |
+| **11** | **Stress test & polish** | Pending |
 
 ## DDR3 Mailbox Architecture
 
 **Why DDR3 mailbox:** The HPS2FPGA lightweight bridge was found to be non-functional on MiSTer for this use case. The DDR3 shared-memory approach uses the existing f2sdram2 Avalon port (already used for audio/PAL), shared via a round-robin arbiter.
 
-### DDR3 Mailbox Protocol
+### Doorbell Architecture (branch `simplification/flat-ddr3-doorbell`)
+
+**Key difference from old bridge:** Zero-latency CSR reads (combinational output from CSR shadow registers), no DTACK stretch for any access. RDP writes raise a doorbell that the ARM daemon polls asynchronously.
+
+#### DDR3 Layout (ARM physical offsets from DDR3_FLAT_BASE = 0x1FF00000)
+
+| Offset | Size | Purpose |
+|--------|------|---------|
+| 0x0000 | 0x8000 (32KB) | Flat boardram window (4×16-bit per 64-bit DDR3 word) |
+| 0x8000 | 8 bytes | CMD slot: `{39'b0, data[15:0], rap[6:0], pending[0]}` |
+| 0x8010 | 8 bytes | CSR shadow: `{csr3, csr2, csr1, csr0}` (64-bit, 16-bit each) |
+| 0x8018 | 8 bytes | INT state: `{63'b0, int_assert[0]}` |
+| 0x8028 | 8 bytes | MAC: `{15'b0, mac[47:0], valid[0]}` |
+
+#### FPGA Modules (doorbell architecture)
+- **`a2065_regfile.v`** — CSR register file + doorbell. Combinational reads from CSR shadow (updated by ARM via DDR3). RDP writes set `cmd_pending` + `cmd_rap` + `cmd_data`. No back-pressure (`regs_nrdy=0` always). Overwrites previous doorbell if still pending.
+- **`a2065_ddram.v`** — 68k DDR3 boardram window. `sel_br = sel && cpu_addr[15]` selects $EA8000+ range. DTACK-stretched (`a2065_bram_nrdy`) while DDR3 round-trip in progress. Level-detected CDC handshake with mailbox FSM.
+- **`a2065_ddr3_mailbox.v`** — Mailbox FSM (clk_audio). Cycles through: CMD poll (level-detect) → BRAM request (level-detect) → CSR/INT poll (every 64 cycles). 6 states: S_IDLE, S_CMD_WR_W/D, S_BR_CAPTURE/READ_W/READ_D/WRITE_W/DONE, S_CSR_RD_W/D, S_INT_RD_W/D.
+
+#### ARM Daemon (`a2065d_doorbell`)
+- Polls CMD slot, processes register writes, pushes CSR shadow + INT state after each CMD
+- Boardram accessed via flat DDR3 window pointer (no per-word mailbox transactions)
+- Build: `make doorbell` (uses `build/doorbell/` directory)
+
+#### Signal Path (doorbell)
+```
+Register read:
+Amiga 68000 → a2065_regfile (combinational output from csr_shadow) → data bus OR-tie
+  CSR shadow updated by ARM → DDR3 CSR slot → mailbox FSM poll → csr0_out..3_in → regfile
+
+Register write (doorbell):
+Amiga 68000 → a2065_regfile → cmd_pending/rap/data (level) → mailbox FSM (CDC 2-stage)
+  → DDR3 CMD slot write → ARM daemon polls → chip_wput() → push_csr_shadow() → DDR3 CSR slot
+
+Boardram:
+Amiga 68000 → a2065_ddram → bram_req_valid (level) → mailbox FSM (CDC 2-stage)
+  → DDR3 read/write → bram_resp_data/valid → ddram (CDC 2-stage) → cpu_data_out
+
+Interrupt:
+ARM daemon → push_csr_shadow + update_int_state → DDR3 INT slot
+  → mailbox FSM polls → a2065_int2 → CDC 2-stage → Paula int2 → 68000 level 2
+```
+
+### Old Bridge DDR3 Mailbox Protocol (branch main)
 
 **Register mailbox (FPGA→ARM for RAP/RDP access):**
 - **REG_REQ** at `DDR3_BASE + 0x8000` (ARM physical) / Avalon `0x1000`
@@ -141,7 +187,7 @@ A2065/
 - **f2sdram2 port:** 29-bit word address, 64-bit data, `clk_audio` (~49MHz)
 - **Arbiter:** Round-robin between ddr_svc (m0, audio/PAL) and A2065 mailbox (m1)
 
-### Signal Path
+### Signal Path (old bridge)
 ```
 Register path:
 Amiga 68000 → a2065_registers (clk_sys, sel_chipreg)
@@ -164,6 +210,74 @@ Interrupt path:
 ```
 
 ## Quartus Build History
+
+### Doorbell Architecture Builds (branch `simplification/flat-ddr3-doorbell`)
+
+#### Build 20260606a (old bridge, known-good baseline)
+- **Architecture:** Old bridge (`a2065_registers.v` BRIDGE_LOCAL=0 + `a2065_boardram.v` TDP BRAM + `a2065d_ddr3`)
+- **MiSTer verified:** lance-test 3/4 PASS — Buffer PASS, Config PASS, Interrupt PASS, Collision FAIL
+- **Note:** Uses `a2065d_ddr3` (old daemon) with DTACK-stretch for every register access
+
+#### Build 20260607a/b (doorbell Phase 2+3 — lance-test HANGS)
+- **Architecture:** Doorbell (`a2065_regfile.v` + `a2065_ddram.v` + `a2065d_doorbell`)
+- **MiSTer result:** lance-test locks up after printing "Copyright" line. OpenDevice hangs.
+- **Root cause:** Three bugs (see build 20260608c fixes below)
+
+#### Build 20260608a (no back-pressure fix — still hangs)
+- **Changes:** `regs_nrdy = 1'b0` always (removed back-pressure on RDP writes). RDP writes overwrite previous pending doorbell.
+- **MiSTer result:** Still hangs — zero CMDs received by ARM daemon. Bug was elsewhere.
+
+#### Build 20260608b (ddram nrdy guard fix — still hangs)
+- **Changes:** ddram `nrdy_state` only transitions to NR_WAIT when `sel_br && !sys_req && !sys_got_resp` (matching request issue condition). Prevents entering NR_WAIT without issuing a DDR3 request.
+- **MiSTer result:** Still hangs. Fix was necessary but insufficient.
+
+#### Build 20260608c (level-detect boardram — DOORBELL WORKING)
+- **Result:** SUCCESS, 0 errors, 100 warnings
+- **Changes:** `a2065_ddr3_mailbox.v`: Changed boardram request detection from edge (`bram_req_valid_s1 & ~bram_req_valid_s2`) to level (`bram_req_valid_s1`). Edge detection could miss requests when FSM was in non-IDLE states processing CMDs or CSR polls.
+- **MiSTer verified:** lance-test runs to completion! Copyright + MAC + "Buffer memory test FAIL". ARM daemon received `[cmd 0] raw=0x0000000000000401 rap=0 data=0004` (CSR0 STOP write).
+- **Sim tests:** tb_regfile 12/12 PASS, tb_autoconfig 36/36, tb_boardram 15/15
+- **ARM tests:** boardram flat 6/6 PASS
+
+#### Build 20260608d (cpu_rw write detection + sel_br_rise edge — REGRESSION, Amiga hangs)
+- **Result:** SUCCESS, 0 errors, 100 warnings
+- **Changes:** `a2065_ddram.v`: Replaced `cpu_hwr`/`cpu_lwr` with `cpu_rw` for write detection (`is_write = ~cpu_rw`). Added `sel_br_rise` edge detection for request issue. `minimig.v`: Connected `cpu_rw` to ddram instead of `cpu_hwr`/`cpu_lwr`.
+- **MiSTer result:** REGRESSION — Amiga locks up during lance-test buffer test. Zero CMDs received by ARM daemon. The `sel_br_rise` edge detection caused the lockup: `sel_br` is a level signal that stays high for the entire bus cycle, and consecutive boardram accesses may not have a falling edge between them, so NR_DONE→NR_IDLE can't transition and the state machine gets stuck.
+
+#### Build 20260608e (cpu_rw without sel_br_rise — REGRESSION, Amiga hangs)
+- **Result:** SUCCESS, 0 errors, 100 warnings
+- **Changes:** Reverted `sel_br_rise` to level-based `sel_br`, kept `cpu_rw` for write detection.
+- **MiSTer result:** REGRESSION — Amiga still hangs during lance-test buffer test. Zero CMDs. The `cpu_rw` signal itself causes the hang. Root cause unclear — possibly `cpu_r_w` has different timing/polarity than expected, or the bridge's `lr_w` signal is not valid when `sel_br` first goes high. Reverted to build 20260608c (cpu_hwr/cpu_lwr).
+
+#### Session 2026-06-08 Findings
+
+- **Test framework fix:** `serial_long.py` must use `\r` (not `\r\n`) for Amiga shell commands. `\n` causes the second word of the command (e.g., `diags`) to be eaten, making lance-test show usage instead of running diagnostics.
+- **`minimig_netd` conflict:** The MiSTer's `/etc/init.d/S90minimig_netd` starts `minimig_netd` which conflicts with the A2065 daemon. Must kill it and disable the init script: `killall minimig_netd; mv /etc/init.d/S90minimig_netd /etc/init.d/S90minimig_netd.disabled`
+- **`cpu_rw` write detection does NOT work:** Replacing `cpu_hwr`/`cpu_lwr` with `cpu_rw` causes Amiga to hang. The pulsed `cpu_hwr`/`cpu_lwr` signals (gated by bridge `enable`) work correctly in practice despite appearing to have a circular dependency with DTACK. The circular dependency is actually broken because the bridge asserts `enable` based on `!nrdy` at a specific clock phase, not continuously.
+- **`sel_br_rise` edge detection does NOT work:** `sel_br` stays high for the entire bus cycle and may not transition low between consecutive boardram accesses, causing the NR_DONE state machine to get stuck. Level-based `sel_br` is required.
+- **Buffer test FAIL root cause still unknown:** Build 20260608c (reverted to cpu_hwr/cpu_lwr) shows Buffer FAIL. The boardram DDR3 path works for ARM flat test (6/6 PASS) but fails for 68k-initiated accesses during lance-test. The write detection is NOT the cause (CMDs are received, meaning register writes work). The issue is specifically in the 68k→DDR3 boardram data path.
+
+#### Three Bugs That Caused the Doorbell Hang (Session 2026-06-08)
+
+1. **`regs_nrdy` back-pressure in regfile** — After the first RDP write set `cmd_pending=1`, the second RDP write would see `cmd_pending_d=1` and assert `regs_nrdy`, stretching DTACK forever (ARM daemon can't clear fast enough for back-to-back writes). **Fix:** `regs_nrdy = 1'b0` always. RDP writes overwrite previous pending doorbell instead of back-pressuring.
+
+2. **ddram nrdy state machine could enter NR_WAIT without issuing a request** — `nrdy_state` transitioned to NR_WAIT whenever `sel_br` was high, but the actual DDR3 request had additional guards (`!sys_req`). If `sys_req` was still set from a previous request, `nrdy_state` would be in NR_WAIT with no request issued → DDR3 response never arrives → permanent bus hang. **Fix:** Guard NR_IDLE→NR_WAIT transition with `!sys_req && !sys_got_resp`.
+
+3. **Mailbox FSM edge detection missed boardram requests** — `bram_req_rise = bram_req_valid_s1 & ~bram_req_valid_s2` is a one-cycle edge pulse. If the FSM was in S_CMD_WR_W, S_CSR_RD_W, or any non-IDLE state during that one cycle, the edge was missed and the boardram request lost forever → ddram stuck in NR_WAIT → bus hang. **Fix:** Changed to level detection (`bram_req_active = bram_req_valid_s1`), same approach as `cmd_active` for doorbell CMDs.
+
+#### Build 20260608f (byteenable→RMW boardram writes — still Buffer FAIL)
+- **Change:** `a2065_ddr3_mailbox.v` boardram writes converted from partial f2sdram2 byteenable to read-modify-write (read 64-bit line, merge 16-bit lane, write full line be=0xFF). New states S_BR_RMW_RD_W/S_BR_RMW_RD_D. Removed `br_be`/`br_wdata_shifted`.
+- **Result:** Buffer still FAIL. Diagnosis via zero-DDR3 + 68k memtest + dump: DDR3 filled with `0x8000|offset` (the address bus). Reads = 0. → 68k writes were being dropped and reads were writing the address. Pointed at request capture, not byteenable. RMW kept (correct for partial writes regardless).
+
+#### Build 20260608g (is_write = cpu_hwr|cpu_lwr — still FAIL, writes vanished)
+- **Change:** flipped `is_write` to `cpu_hwr | cpu_lwr` (active-high enables).
+- **Result:** DDR3 now stays all-zero after memtest, reads still 0. Confirmed the real problem: capture on raw `sel_br` (address phase) samples direction+data before the strobes/data are valid. At capture time hwr/lwr=0 → with this polarity everything classified read → writes dropped.
+
+#### Build 20260608h (AS+DS capture qualification — BUFFER TEST PASS)
+- **Result:** SUCCESS, 0 errors, 100 warnings. RBF `Minimig_20260608h.rbf` (3513552 bytes).
+- **Change:** `a2065_ddram.v` — `sel_br = sel && cpu_addr[15] && !cpu_as_n && !cpu_ds_n`; `is_write = ~cpu_rw`; gated `cpu_data_out`. `minimig.v` — pass `cpu_r_w`, `_cpu_as`, `_cpu_uds & _cpu_lds`.
+- **MiSTer verified:** lance-test `Buffer memory test PASS` (was FAIL). share:a2065_memtest 7/10: walking-bit PASS, address-uniqueness PASS, post-INIT integrity PASS, CSR STOP/RAP/model-ID PASS. Fails: byte access + odd/even byte independence (RMW word-granular, note 16), CSR0 IDON after INIT (separate interrupt/init issue). lance-test now advances to LANCE configuration test (FAIL — same IDON root cause).
+
+### Old Bridge Builds (branch main)
 
 ### Build 20260507 (register DDR3 round-trip verified)
 - **Result:** SUCCESS, 0 errors, 75 warnings
@@ -394,6 +508,17 @@ Also yc_out chroma LUT multicycle constraints (lines 29-34) to fix timing degrad
 - **Register processing:** Responds to register requests BEFORE calling chip_wput() (deadlock prevention)
 - **service_bridge_safe:** Called from boardram DDR3 transactions during do_transmit. Only forwards RAP writes to chip_wput — CSR0 writes are silently dropped. This causes stale CSR0 state when Amiga writes CSR0 during do_transmit processing.
 
+## ARM Daemon (`a2065d_doorbell`)
+
+- **Source:** `arm/src/main_doorbell.cpp`
+- **Deployed to:** `/media/fat/trans/a2065d_doorbell`
+- **Build:** `make doorbell` (uses `build/doorbell/` directory)
+- **Boardram access:** Direct DDR3 flat window pointer (`map + DDR3_BRAM_OFF`) — no per-word mailbox
+- **Polling:** DDR3 CMD slot every main loop iteration
+- **Register processing:** Polls CMD pending bit, calls `chip_wput()` for RAP+data, clears CMD slot, pushes CSR shadow + INT state
+- **Cross-compile:** Same as old daemon
+- **Startup:** Clears CMD/CSR/INT DDR3 slots, writes MAC to MAC slot, pushes initial CSR shadow
+
 ### ARM Build Notes
 - `boardram_access.h` uses `extern "C"` for function declarations to match `boardram_remote.cpp` definitions
 - `registers_set_boardram()` has `#ifndef BOARDRAM_REMOTE` guard (skips `boardram = ram` assignment in DDR3 build)
@@ -413,7 +538,7 @@ Also yc_out chroma LUT multicycle constraints (lines 29-34) to fix timing degrad
 ## Key Design Decisions
 
 1. **DDR3 mailbox over HPS2FPGA:** HPS2FPGA lightweight bridge doesn't work for this on MiSTer. DDR3 shared memory via f2sdram2 works (confirmed build 20260507).
-2. **Level detection for register requests:** Edge detection (`req_edge`) was missed when state machine was in RAM polling states. Level detection (`req_sync1`) ensures register requests are never lost.
+2. **Level detection for all mailbox requests:** Edge detection (`req_edge`) was missed when state machine was in non-IDLE states. Level detection (`req_sync1` / `bram_req_valid_s1`) ensures requests are never lost. Applied consistently to CMD doorbell, boardram, and old register requests.
 3. **Read-modify-write for TDP boardram:** Quartus can't infer TDP M10K from separate byte arrays across two clock domains. Single 16-bit array with RMW for byte enables is the Quartus-friendly pattern.
 4. **ARM port directions must be inputs to minimig:** The boardram ARM port signals flow from sys_top.v (mailbox adapter) DOWN through emu→minimig→boardram. They must be declared as `input` in minimig.v, not `output`.
 5. **Boardram Port B clock = clk_audio:** Matches mailbox adapter clock domain, avoids additional CDC.
@@ -425,34 +550,39 @@ Also yc_out chroma LUT multicycle constraints (lines 29-34) to fix timing degrad
 11. **INT2 into Paula PORTS:** A2065 interrupt OR-tied into Paula's `int2` input (INTREQ bit 3 → level 2). 2-stage CDC synchronizer in minimig.v for clk_audio→clk_sys crossing.
 12. **Self-loopback collision detection:** The Am7990 relies on physical loopback plug for collisions; MODE_COLL is never set in init block. Daemon detects DST MAC == own MAC and simulates collision (TX_ERR+TX_RTRY).
 13. **TDMD triggers without STRT:** lance-test collision test never writes STRT separately. TDMD triggers `do_transmit()` based on `am_initialized` only. `am_initialized` preserved across STOP to support STOP → STRT+TDMD sequences.
+14. **No back-pressure on doorbell RDP writes:** The ARM daemon can't clear `cmd_pending` fast enough for back-to-back 68k writes. RDP writes always complete immediately (no DTACK stretch); the new write overwrites the previous pending doorbell. The ARM daemon only needs the latest register state.
+15. **Level-detect CDC handshakes:** All cross-clock-domain request signals (cmd_pending, bram_req_valid) use level detection in the mailbox FSM, not edge detection. Edge detection fails when the FSM is busy processing other requests during the one-cycle edge window.
+16. **ddram MUST qualify capture with AS+DS, not raw sel (build 20260608h — BUFFER TEST FIXED):** The root cause of the doorbell buffer-test failure was capturing the boardram request on raw `sel_br = sel && cpu_addr[15]` — which is high during the *address* phase, before the write strobes and write data are valid. So both the direction and the write data were sampled too early. **Fix:** `sel_br = sel && cpu_addr[15] && !cpu_as_n && !cpu_ds_n` and `is_write = ~cpu_rw`, exactly like `a2065_regfile`. DS deasserts between bus cycles, giving a clean NR_DONE→NR_IDLE separation (no edge detect needed). minimig.v passes `.cpu_rw(cpu_r_w)`, `.cpu_as_n(_cpu_as)`, `.cpu_ds_n(_cpu_uds & _cpu_lds)`.
+    - **The earlier `cpu_rw` attempts (20260608d/e) failed only because they kept raw `sel_br`** (no DS qualification) — `sel_br` never falls between accesses → NR_DONE stuck → hang. The signal `cpu_r_w` itself was fine. The old "`cpu_hwr/lwr` works" claim was wrong: it didn't hang but silently corrupted data — every read was misclassified as a write of the address bus, every write was dropped (DDR3 filled with `0x8000|offset`, all reads returned 0). Proven by zeroing DDR3, running 68k memtest, and dumping: writes landed as address values.
+    - ddram `cpu_data_out` is now a **gated** wire (`(sel && cpu_addr[15] && cpu_rw) ? rd_data : 0`) so the held read value can't corrupt the OR-mux for other peripherals.
+17. **`sel_br_rise` edge detection does NOT work; DS-qualified level `sel_br` is correct:** Edge detect on raw `sel_br` gets stuck because raw `sel_br` doesn't fall between consecutive accesses. The AS+DS-qualified `sel_br` (note 16) DOES toggle each bus cycle, so a plain level test works.
 
 ## Known Issues / Notes
 
 - MAC serial bytes in cpu_wrapper.v are hardcoded (0x02, 0x70, 0x70, 0x70) — needs ARM-side runtime patching
 - `cpu_berr_n` from register module not connected — watchdog timeout returns $0000 (not BERR)
-- `boardram_remote.cpp` has unused `fd` variable (cosmetic warning)
-- `main_ddr3.cpp` format string warning for `%X` vs `long unsigned int` (cosmetic)
-- **Thread safety:** RX thread (`gotfunc`) and main thread both access CSR0 and boardram. No mutex protection. Currently benign because `registers_csr0()` reads a volatile uint16_t (atomic on ARM), and boardram DDR3 mailbox is single-threaded through `boardram_xfer()`. If issues arise, add locking.
-- **lance-test diags (build 20260601c + daemon 10M threshold — current):** Buffer 100%, LANCE config 97%, Interrupt 88%, Collision 76%, Loopback 53%. ALL PASS ~53%. A11 bridge health flood is dominant failure mode.
-- **Bridge health is fundamentally harmful — all variants cause damage:**
-  - 1M threshold: A11 fires during buffer test idle gaps (350+ fires), kills register path (7 failures)
-  - 10M threshold: A11 still fires (35 fires per occurrence), kills register path (11 failures)
-  - 10M + no REG_RSP clear: WORSE (20 failures) — clearing RAM_RSP also kills active boardram transactions
-  - Root cause: any mailbox clear while FPGA is mid-transaction is fatal
-  - Next: disable bridge health entirely, rely on DDR3 phantom reads as only failure mode
-- **Collision test root cause:** Daemon never sees TDMD writes for collision test packet sends. `do_transmit()` not called. Amiga writes CSR0=0x00EA (STRT+TDMD+TXON+INEA+INTR) but daemon log shows only STOP(0x0004)/INIT(0x0041)/clear_IDON(0x0100) writes. Possibly FPGA mailbox adapter stuck or intermittent register bridge failure.
-- **Interrupt timing race:** ~10% failure rate. During `chip_init()` boardram DDR3 access, FPGA mailbox adapter is busy with RAM_REQ and NOT polling MBX_INT. Pre-assert + hold counter + post-INIT delay mitigates but doesn't eliminate.
-- **AddNetInterface A2065:** Daemon only saw 1 request then nothing. Driver appears to stall. May be related to now-fixed boardram timeouts or missing interrupt support.
+- **Doorbell buffer test FIXED (build 20260608h):** lance-test `Buffer memory test........ PASS`. share:a2065_memtest: walking-bit (16×16384) PASS, address-uniqueness PASS, post-INIT integrity PASS. Root cause + fix in Key Design Decisions #16. Two changes stacked: (a) byteenable→RMW for partial DDR3 writes (build f), (b) AS+DS capture qualification + `cpu_rw` direction (build h). Remaining boardram fails: **byte access** + **odd/even byte independence** — the RMW merge writes the full 16-bit `cpu_data_in` even on a byte access, clobbering the untouched byte. Needs per-byte enable in the RMW merge (forward `_cpu_uds`/`_cpu_lds` → 2-bit be → mailbox merges only the written byte). Word access (what lance-test buffer uses) is correct.
+- **Cross-compiled Amiga programs fail silently:** `-noixemul` binaries (GCC m68k-amigaos) don't produce any output on Minimig serial — startup code silently exits. VBCC binaries have broken `Open()`. Only pre-compiled binaries (lance-test on `share:`) and AmigaOS shell commands work. The `share:lance-test` binary is the only working test tool.
+- **Serial output from Amiga programs:** `share:lance-test diags` works and produces serial output. AmigaOS shell commands (echo, showconfig, type) work. Cross-compiled C programs produce no output regardless of compiler (GCC -noixemul, GCC default, VBCC).
+- **lance-test location:** `share:lance-test` on the Amiga filesystem (not in `/media/fat/trans/`). Run via serial as `share:lance-test diags`.
+- **lance-test diags (build 20260606a + old bridge):** Buffer PASS, Config PASS, Interrupt PASS, Collision FAIL — known-good baseline
+- **lance-test diags (build 20260608c + doorbell):** Buffer FAIL (other tests not reached). Doorbell path proven working — ARM daemon received CSR0=STOP writes. Serial command must use `\r` not `\r\n` (test framework fix applied to `serial_long.py`).
+- **Thread safety:** RX thread (`gotfunc`) and main thread both access CSR0 and boardram. No mutex protection. Currently benign because `registers_csr0()` reads a volatile uint16_t (atomic on ARM), and boardram DDR3 flat access is single-threaded.
+- **AddNetInterface A2065:** Not yet tested with doorbell daemon.
 
 ## MiSTer Operational Notes
 
 - Core reload via SSH: `echo 'load_core /media/fat/<rbf_file>' > /dev/MiSTer_cmd`
 - Serial port: `/dev/ttyS1` at 115200 baud (stty configured)
-- Kill daemon before deploying new binary: `killall a2065d_ddr3; rm /media/fat/trans/a2065d_ddr3`
+- Kill daemon before deploying new binary: `killall a2065d_doorbell; rm /media/fat/trans/a2065d_doorbell`
 - exFAT on `/media/fat` with `sync` mount — may need to `rm` before `scp` if file in use
 - Boardram test (`--test-boardram`) now works without core reload (stale state fix)
 - `--iface eth1` for daemon (eth0 may be used by MiSTer main)
 - Test binaries need `-static` flag for ARM cross-compilation
+- lance-test binary is on `share:` volume, run as `share:lance-test diags` from serial
+- **Cross-compiled Amiga binaries don't work:** Neither GCC `-noixemul` nor VBCC produce working AmigaOS executables on this Minimig setup. Programs silently exit or produce no output.
+- **Serial line ending:** Must use `\r` (not `\r\n`) for Amiga shell commands via serial. `\n` causes the second word of multi-word commands to be eaten.
+- **`minimig_netd` must be killed:** `/etc/init.d/S90minimig_netd` starts `minimig_netd` which conflicts with the A2065 daemon. Disable: `killall minimig_netd; mv /etc/init.d/S90minimig_netd /etc/init.d/S90minimig_netd.disabled`
 
 ## Git History
 
@@ -477,14 +607,22 @@ Also yc_out chroma LUT multicycle constraints (lines 29-34) to fix timing degrad
 | *(pending)* | May 28 | CDC synchronizer for bridge_done build 20260528a, lance-test 100x runner |
 | *(pending)* | May 29 | Self-loopback collision detection, rethink() interrupt callback, MBX_INT hold counter, TDMD without STRT, pre-assert MBX_INT for INIT/TDMD |
 | *(pending)* | Jun 01 | DDR3 read-back after REG_REQ clear, bridge health check (unstuck FPGA), TMD1-first write ordering for collision/loopback |
+| *(pending)* | Jun 06 | Build 20260606a: known-good old bridge baseline (3/4 PASS) |
+| `aa5f547` | Jun 7 | Phase 0: spec + simulation for flat DDR3 boardram + CSR doorbell |
+| `2d9e398` | Jun 7 | Phase 1: flat DDR3 boardram window + mailbox FSM rework |
+| `aa9c252` | Jun 7 | Phase 2: FPGA regfile + doorbell + flat boardram DDR3 window (submodule) |
+| `d18577a` | Jun 7 | Phase 3: ARM doorbell daemon (parent commit) |
+| *(pending)* | Jun 8 | Build 20260608c: three bug fixes — no back-pressure, ddram nrdy guard, level-detect boardram. Doorbell working, lance-test runs, Buffer FAIL |
+| `fbd5bc3` | Jun 8 | Phase 4: three doorbell bug fixes (submodule) |
+| `723c731` | Jun 8 | Phase 4: submodule update — three bug fixes (parent) |
+| `5941593` | Jun 8 | Phase 4 fix: cpu_rw write detection in ddram (submodule, REGRESSED) |
+| `fd5a462` | Jun 8 | Phase 4 fix: submodule update — cpu_rw (parent, REGRESSED) |
 
 ## Remaining Work
 
-1. **Fix register bridge reliability** — 10% LANCE config failure rate. DDR3 read-back fix deployed; needs retest.
-2. **Fix interrupt timing race** — ~10% failure rate. FPGA mailbox adapter busy with RAM_REQ during chip_init(). Consider FPGA-level interrupt latching (assert INT2 directly in mailbox adapter when MBX_INT written, not poll-based).
-3. **Fix collision/loopback TMD timing** — TMD1-first ordering fix deployed; needs retest. DDR3 write propagation delay may still cause Amiga to read stale descriptors.
-4. **Investigate MAC byte ordering** — lance-test shows `00:FFFFFF80:10:00:00:00` (sign-extension of 0x80 byte)
-5. **Test AddNetInterface A2065** — real AmigaOS driver test
-6. **Stress test & polish** (Step 10) — extended run stability, packet throughput
-7. **Connect cpu_berr_n** — watchdog timeout should generate BERR, not return $0000
-7. **Connect cpu_berr_n** — watchdog timeout should generate BERR, not return $0000
+1. **Fix doorbell buffer test FAIL** — Boardram DDR3 read/write mismatch during lance-test buffer memory test. ARM flat test passes (6/6) but 68k-initiated DDR3 boardram accesses fail. `cpu_rw` write detection fix causes Amiga hang (builds 20260608d/e REGRESSED), so the write detection issue must be solved differently. The `cpu_hwr`/`cpu_lwr` pulsed signals work despite theoretical circular dependency. Need to investigate the actual DDR3 data path for 68k boardram accesses — possibly write data timing, address packing, or DDR3 read-modify-write issue with partial byte enables.
+2. **Run full lance-test diags** — Get Config, Interrupt, Collision, Loopback tests running with doorbell architecture (blocked on buffer test fix).
+3. **Investigate MAC byte ordering** — lance-test shows `00:FFFFFF80:10:00:00:00` (sign-extension of 0x80 byte)
+4. **Test AddNetInterface A2065** — real AmigaOS driver test with doorbell daemon
+5. **Stress test & polish** (Step 11) — extended run stability, packet throughput
+6. **Connect cpu_berr_n** — watchdog timeout should generate BERR, not return $0000
