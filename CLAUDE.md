@@ -107,7 +107,7 @@ A2065/
 | 8 | FPGA chip register bridge + DTACK stretch | Done (sim + Quartus + MiSTer verified) |
 | 9 | Integration (ARM + FPGA on MiSTer) | **Done** — old bridge: deadlock fix, stale state fix, MAC fix, interrupt generation, CDC bridge_done fix |
 | **10** | **Doorbell architecture** | **DONE** — lance-test **5/5 PASS, "Controller PASSED diagnostics"** (build 20260609a + byteswap daemon). Buffer/Config/Interrupt/Collision/Loopback all PASS. share:a2065_memtest 10/10. **External loopback test PASS** (real eth1 frame round-trip). Surpasses old-bridge baseline (3/4). |
-| **11** | **Stress test & polish** | **In Progress** — lance-test x100: 70/70 ALL PASS across two partial runs (no failures); full 100x not yet completed. MAC display cosmetic (issue #3) remains. |
+| **11** | **Stress test & polish** | **DONE** — lance-test **x100: 100/100 ALL PASS** (all 5 tests 100%, single persistent daemon, report `tests/lance_logs/results_100x_20260609_143735.md`). Daemon adaptive backoff (idle CPU ~100%→~9%) + `--debug` flag. AddNetInterface A2065 → DHCP lease on real network. Only MAC display cosmetic (issue #3) remains. |
 
 ## DDR3 Mailbox Architecture
 
