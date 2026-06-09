@@ -252,18 +252,9 @@ def main():
         print(f"[setup] Ready")
         print()
 
+        # Daemon is started once in setup above and left running for the
+        # whole test; it is only restarted by recovery() on a failed run.
         for i in range(1, RUNS + 1):
-            stop_daemon(ssh)
-            time.sleep(0.5)
-            if not start_daemon(ssh):
-                consecutive_fails += 1
-                if consecutive_fails >= 3:
-                    print(f"  [recovery] Daemon won't start, full restart...")
-                    if not recovery(ssh):
-                        print(f"  FATAL: recovery failed")
-                        break
-                continue
-
             ts = datetime.now().strftime("%H:%M:%S")
             print(f"  [{ts}] Run {i}/{RUNS}...", end=" ", flush=True)
 
