@@ -106,7 +106,7 @@ A2065/
 | 7 | FPGA boardram window | Done (sim + Quartus) |
 | 8 | FPGA chip register bridge + DTACK stretch | Done (sim + Quartus + MiSTer verified) |
 | 9 | Integration (ARM + FPGA on MiSTer) | **Done** — old bridge: deadlock fix, stale state fix, MAC fix, interrupt generation, CDC bridge_done fix |
-| **10** | **Doorbell architecture** | **In Progress** — build 20260608h: lance-test **Buffer memory test PASS** (was FAIL). Root cause: ddram captured request on raw `sel_br` before strobes/data valid; fixed with AS+DS qualification + `cpu_rw`. Boardram word path proven. Remaining: byte-granular RMW, CSR0 IDON/LANCE config. |
+| **10** | **Doorbell architecture** | **DONE** — lance-test **5/5 PASS, "Controller PASSED diagnostics"** (build 20260609a + byteswap daemon). Buffer/Config/Interrupt/Collision/Loopback all PASS. share:a2065_memtest 10/10. Surpasses old-bridge baseline (3/4). |
 | **11** | **Stress test & polish** | Pending |
 
 ## DDR3 Mailbox Architecture
@@ -282,6 +282,12 @@ Interrupt path:
 - **Change:** end-to-end doorbell back-pressure. `a2065_regfile.v`: RDP writes stretch DTACK (W_IDLE→W_WAIT→W_DONE FSM, `regs_nrdy = wstate==W_WAIT`) until the doorbell is drained; RAP writes stay local, reads stay zero-latency. `a2065_ddr3_mailbox.v`: after posting CMD, poll the DDR3 CMD slot (new S_CMD_POLL_W/S_CMD_POLL_D) until the daemon clears the pending bit, then pulse `cmd_clear`. No daemon change (it already writes CMD slot = 0 after draining).
 - **Root cause fixed:** no-back-pressure single CMD slot lost writes when the 68k outran the daemon drain, dropping the rapid LANCE INIT RAP/RDP sequence (CSR1/CSR2/CSR3 init-addr + CSR0=INIT) → init block never set → CSR0 IDON never asserted.
 - **MiSTer verified:** lance-test **Buffer PASS, LANCE configuration PASS, Interrupt PASS, Collision FAIL (3/4)** — matches old-bridge known-good baseline 20260606a. share:a2065_memtest 8/10: + CSR0 IDON after INIT now PASS. Remaining fails: byte access + odd/even (RMW word-granular).
+
+#### Daemon byteswap (boardram_access.h) — lance-test 5/5 PASS (no Quartus rebuild)
+- **Change:** `arm/include/boardram_access.h` flat (#else) accessors XOR every byte index with 1: `boardram[(off ^ 1) & RAM_MASK]`. The 68k is big-endian; the FPGA stores each 68k 16-bit word little-endian in its DDR3 lane (byte[off]=D[7:0], byte[off+1]=D[15:8]), so a byte the 68k placed at offset `off` lives at ARM offset `off ^ 1`. Without this the daemon read the 68k-written init block byteswapped → wrong TDRA/RDRA → `do_transmit` found no TX descriptors.
+- **Diagnosis:** added DOTX/scan logging — `do_transmit` ran but TX ring at the computed `tdra=0x1880` was all zeros, while the real descriptors (TMD OWN|STP) sat at boardram 0x18. The init-block TDRA field bytes `18 80` read big-endian gave 0x1880; little-endian gave 0x8018 → `& RAM_MASK` = 0x18 (where the descriptors actually are). After fix: `mode` reads 0x0044 (was 0x5400), TDRA resolves correctly, all 10 collision sends run.
+- **GOTCHA (cost ~5 build cycles):** a **stale duplicate `src/boardram_access.h` existed only on the build host** (192.168.1.97), not in the repo. Since `registers.cpp`/`rings.cpp` live in `src/` and `#include "boardram_access.h"`, the compiler resolved the same-dir `src/` copy *before* `-I include`, silently ignoring edits to `include/boardram_access.h` (md5 unchanged, `raw[0]` stayed 0x5400). Fix: `rm src/boardram_access.h` on the build host. Verify which header is active with `g++ -I include -E src/registers.cpp | grep get_ram_byte`.
+- **MiSTer verified:** lance-test Buffer/Config/Interrupt/Collision/Loopback **5/5 PASS**, "Controller PASSED diagnostics". memtest still 10/10. Daemon-only change — same FPGA (build 20260609a / `Minimig_20260609a.rbf`).
 
 #### Build 20260609a (byte-granular RMW — memtest 10/10)
 - **Result:** SUCCESS, 0 errors, 101 warnings. RBF `Minimig_20260609a.rbf`.
