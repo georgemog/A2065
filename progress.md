@@ -133,21 +133,61 @@ Used a systematic binary-search approach:
 
 ---
 
+## Session: June 6-9, 2026 — Doorbell architecture: full lance-test pass + real networking
+
+### Summary
+
+Rebuilt the bridge as the **doorbell architecture** (branch `simplification/flat-ddr3-doorbell`): zero-latency CSR reads from a DDR3 shadow + a flat DDR3 boardram window, replacing the per-access DTACK-stretch mailbox. Root-caused and fixed every remaining failure. lance-test now passes **all five tests** ("Controller PASSED diagnostics"), **100/100** over a stress run, and a real AmigaOS TCP/IP stack gets a **DHCP lease** over the card.
+
+### Fixes (all hardware-verified, committed)
+
+| Fix | Build / commit | Result |
+|-----|----------------|--------|
+| Boardram 68k capture on raw `sel_br` (pre-strobe) → qualify with AS+DS + `cpu_rw` | 20260608h / `be20f41` | Buffer test PASS |
+| Partial DDR3 writes unproven → read-modify-write | 20260608f | (folded in) |
+| INIT RAP/RDP sequence lost (no back-pressure) → end-to-end drain handshake | 20260608i / `be20f41` | Config + IDON + Interrupt PASS |
+| Word-granular RMW clobbered byte writes → forward UDS/LDS byte-enables | 20260609a / `ff20394` | memtest 10/10 |
+| Daemon read 68k boardram byte-swapped → XOR byte offset in flat accessors | daemon `300c1a2` | Collision PASS (5/5) |
+| Daemon busy-spin pegged a core → adaptive poll backoff + `--debug` flag | daemon `ba7b5ac` | idle CPU ~100%→~2-9% |
+
+### Verification
+
+| Test | Result |
+|------|--------|
+| lance-test diags (Buffer/Config/Interrupt/Collision/Internal-loopback) | **5/5 PASS** |
+| lance-test **x100** (single persistent daemon) | **100/100, 100% each** |
+| share:a2065_memtest | **10/10 PASS** |
+| External loopback (real eth1 frame round-trip) | **PASS** |
+| AddNetInterface A2065 → DHCP | **lease 192.168.1.190, route, DNS** |
+| Daemon CPU under load / mem | 2-7% / ~2% (11.7 MB), no leak |
+
+Surpasses the old-bridge baseline (3/4) on a simpler architecture. Steps 0-11 complete. Only the MAC-display cosmetic (FPGA station-address bytes unwired, issue #3) remains — left as-is, doesn't affect networking.
+
+### Big gotchas this session
+
+- **Capture must gate on the data strobe, not the address decode.** Raw `sel_br` is high during the 68k address phase before write data/direction are valid. AS+DS qualification (like the regfile) fixed it; earlier `cpu_rw` attempts failed only because they kept raw `sel_br`.
+- **68k big-endian vs ARM little-endian DDR3 lane.** The daemon must XOR the flat byte offset with 1 to read 68k-written init blocks/descriptors. memtest/buffer pass without it (68k-self-consistent), masking the bug — only cross-domain (daemon parsing 68k data) breaks.
+- **Stale duplicate header on the build host.** A `src/boardram_access.h` existed only on 192.168.1.97 (not the repo) and shadowed `include/` (same-dir `#include` wins over `-I include`). Header edits silently had zero effect (md5 unchanged). Cost ~5 build cycles. Verify the active header with `g++ -I include -E src/<f>.cpp | grep <sym>`.
+
+---
+
 ## Current Status
+
+_Doorbell architecture, branch `simplification/flat-ddr3-doorbell` (RBF `Minimig_20260609a.rbf`, daemon `a2065d_doorbell` commit `ba7b5ac`)._
 
 | Component | Status |
 |-----------|--------|
-| FPGA autoconfig | ✅ Working (A2065 detected at $EA0000) |
-| FPGA register decode (offset $4000) | ✅ Working ($DEAD confirmed) |
-| FPGA DTACK hold (regs_nrdy) | ✅ Working |
-| CDC (clk_sys → clk_audio) | ✅ Working ($BEEF confirmed) |
-| DDR3 write path (FPGA → DDR3) | ✅ Working ($CAFE confirmed) |
-| DDR3 read path (FPGA ← DDR3) | ✅ Fixed (arbiter + mailbox) — needs verification |
-| ARM daemon DDR3 polling | ✅ Deployed (bridge_ddr3.cpp) |
-| Full round-trip (Amiga → DDR3 → ARM → DDR3 → Amiga) | ⏳ Pending test |
-| LANCE CSR emulation in ARM | 🔲 TODO |
-| Boardram ARM access via DDR3 | 🔲 TODO |
-| A2065 AmigaOS driver test | 🔲 TODO |
+| FPGA autoconfig (A2065 at $EA0000) | ✅ Working |
+| FPGA CSR regfile (zero-latency reads + doorbell) | ✅ Working |
+| FPGA flat DDR3 boardram window (word + byte, AS+DS capture, byte-enable RMW) | ✅ Working |
+| INIT register-sequence back-pressure | ✅ Working |
+| ARM daemon: CSR emulation, ring walker, raw-socket ethernet | ✅ Working |
+| Daemon boardram byte-order (XOR-1 flat accessors) | ✅ Fixed |
+| Daemon efficiency (adaptive backoff) + `--debug` flag | ✅ Working (idle ~2-9%) |
+| lance-test diags 5/5 + x100 100/100 + memtest 10/10 | ✅ PASS |
+| External loopback + AddNetInterface DHCP | ✅ PASS |
+| MAC display (FPGA station-address bytes unwired) | 🔲 Cosmetic — left as-is (issue #3) |
+| `cpu_berr_n` (watchdog → BERR vs $0000) | 🔲 TODO (low) |
 
 ---
 
@@ -166,3 +206,11 @@ Used a systematic binary-search approach:
 6. **Combinatorial vs registered arbitration**: Grant decisions must be combinatorial to avoid single-cycle gaps where the wrong master can steal a burst.
 
 7. **Incremental diagnostics**: Use hardcoded return values ($DEAD, $BEEF, $CAFE) to isolate which stage of a multi-stage path fails.
+
+8. **Gate bus capture on the data strobe, not the address decode**: a raw chip-select is high during the 68k address phase, before write data and R/W are valid. Qualify request capture with `!AS && !DS` (and sample `cpu_rw` then). DS also deasserts between cycles, giving clean access separation without edge detection.
+
+9. **Endianness bites only cross-domain**: 68k (big-endian) words land in the DDR3 lane little-endian. 68k-only tests (memtest, buffer) are self-consistent and pass, hiding the swap; it only breaks when the little-endian daemon parses 68k-written structures (init block, descriptors). Fix in the daemon: XOR the byte offset with 1.
+
+10. **A handshake doorbell needs end-to-end drain confirmation**: a single no-back-pressure CMD slot silently drops writes when the producer outruns the consumer (lost the rapid LANCE INIT RAP/RDP sequence). Stretch the producer (DTACK) until the consumer has actually drained — not just until the value was posted.
+
+11. **The build host is rsync'd, not the repo**: a stale duplicate header (`src/boardram_access.h`) existed only on the build machine and shadowed `include/` (same-dir `#include` wins over `-I`). Edits had zero effect, md5 unchanged. When a change "does nothing," preprocess (`g++ -E`) to see what the compiler actually used.
