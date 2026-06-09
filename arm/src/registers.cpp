@@ -9,6 +9,7 @@
  */
 
 #include "a2065_types.h"
+#include "a2065_debug.h"
 #include "boardram_access.h"
 #include "a2065_bridge.h"
 #include <stdint.h>
@@ -16,6 +17,9 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <pthread.h>
+
+/* Runtime debug switch (see a2065_debug.h). Shared by all daemon builds. */
+int a2065_debug = 0;
 
 /* ── Internal state ────────────────────────────────────────────────── */
 static volatile uint16_t csr[RAP_SIZE];
@@ -99,9 +103,9 @@ static void chip_init(void)
     uint32_t iaddr = ((csr[2] & 0xff) << 16) | csr[1];
     int off = iaddr & RAM_MASK;
 
-    fprintf(stderr, "[a2065] chip_init: iaddr=%06X off=%04X csr1=%04X csr2=%04X\n",
+    DBG("[a2065] chip_init: iaddr=%06X off=%04X csr1=%04X csr2=%04X\n",
             iaddr, off, csr[1], csr[2]);
-    fprintf(stderr, "[a2065] chip_init: raw[0]=%04X raw[2]=%04X raw[4]=%04X raw[6]=%04X raw[8]=%04X\n",
+    DBG("[a2065] chip_init: raw[0]=%04X raw[2]=%04X raw[4]=%04X raw[6]=%04X raw[8]=%04X\n",
             get_ram_word(off + 0), get_ram_word(off + 2), get_ram_word(off + 4),
             get_ram_word(off + 6), get_ram_word(off + 8));
 
@@ -128,7 +132,7 @@ static void chip_init(void)
     fakemac[5] = get_ram_byte(off + 6);
 
     chip_init_mask();
-    fprintf(stderr, "[a2065] chip_init: mode=%04X rdr_rlen=%u tdr_tlen=%u "
+    DBG("[a2065] chip_init: mode=%04X rdr_rlen=%u tdr_tlen=%u "
             "rdra=%06X tdra=%06X MAC=%02X:%02X:%02X:%02X:%02X:%02X\n",
             am_mode, am_rdr_rlen, am_tdr_tlen, am_rdr_rdra, am_tdr_tdra,
             fakemac[0], fakemac[1], fakemac[2], fakemac[3], fakemac[4], fakemac[5]);
@@ -182,7 +186,7 @@ void chip_wput(uint8_t reg_offset, uint16_t v)
         if ((csr[0] & CSR0_STOP) && !(oreg & CSR0_STOP)) {
             csr[0] = CSR0_STOP;
             csr[3] = 0;
-            fprintf(stderr, "[a2065] STOP\n");
+            DBG("[a2065] STOP\n");
         } else if ((csr[0] & CSR0_STRT) && !(oreg & CSR0_STRT) &&
                    (oreg & (CSR0_STOP | CSR0_INIT))) {
             csr[0] &= ~CSR0_STOP;
@@ -193,7 +197,7 @@ void chip_wput(uint8_t reg_offset, uint16_t v)
                 csr[0] |= CSR0_IDON;
                 am_initialized = 1;
             }
-            fprintf(stderr, "[a2065] START csr0=%04X\n", csr[0]);
+            DBG("[a2065] START csr0=%04X\n", csr[0]);
         } else if ((csr[0] & CSR0_INIT) && !(oreg & CSR0_INIT) &&
                    (oreg & CSR0_STOP)) {
             chip_init();
@@ -201,7 +205,7 @@ void chip_wput(uint8_t reg_offset, uint16_t v)
             csr[0] &= ~(CSR0_RXON | CSR0_TXON | CSR0_STOP);
             am_initialized = 1;
             csr[3] = 0;
-            fprintf(stderr, "[a2065] INIT csr0=%04X\n", csr[0]);
+            DBG("[a2065] INIT csr0=%04X\n", csr[0]);
         }
 
         if (csr[0] & CSR0_TDMD) {
@@ -210,7 +214,7 @@ void chip_wput(uint8_t reg_offset, uint16_t v)
                     csr[0] &= ~CSR0_STOP;
                     if (!(am_mode & MODE_DTX)) csr[0] |= CSR0_TXON;
                     if (!(am_mode & MODE_DRX)) csr[0] |= CSR0_RXON;
-                    fprintf(stderr, "[a2065] implicit STRT from TDMD csr0=%04X\n", csr[0]);
+                    DBG("[a2065] implicit STRT from TDMD csr0=%04X\n", csr[0]);
                 }
                 if (on_transmit) {
                     on_transmit();

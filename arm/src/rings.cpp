@@ -6,6 +6,7 @@
  */
 
 #include "a2065_types.h"
+#include "a2065_debug.h"
 #include "a2065_bridge.h"
 #include "boardram_access.h"
 #include <stdint.h>
@@ -72,7 +73,7 @@ int do_transmit(void)
             if ((tmd1 & TX_OWN) && (tmd1 & TX_STP)) break;
         }
         if (!(tmd1 & TX_OWN) || !(tmd1 & TX_STP)) {
-            if (registers_mode() & MODE_LOOP) {
+            if (a2065_debug && (registers_mode() & MODE_LOOP)) {
                 fprintf(stderr, "[a2065] TX scan fail: tdr_tdra=%04X tlen=%d off=%d",
                         tdr_tdra, tdr_tlen, start);
                 for (int i = 0; i < tdr_tlen; i++) {
@@ -102,7 +103,7 @@ int do_transmit(void)
             tmd3 |= TX_BUFF | TX_UFLO;
             tmd1 |= TX_ERR;
             registers_csr0_clr(CSR0_TXON);
-            fprintf(stderr, "[a2065] TX OWN not set\n");
+            DBG("[a2065] TX OWN not set\n");
             err = 1;
             put_ram_word(off + 2, tmd1);
             put_ram_word(off + 6, tmd3);
@@ -141,7 +142,7 @@ int do_transmit(void)
         tmd3 |= TX_BUFF | TX_UFLO;
         tmd1 |= TX_ERR;
         registers_csr0_clr(CSR0_TXON);
-        fprintf(stderr, "[a2065] TX underflow: %d bytes\n", outsize);
+        DBG("[a2065] TX underflow: %d bytes\n", outsize);
         put_ram_word(off + 6, tmd3);
         put_ram_word(off + 2, tmd1);
         registers_csr0_set(CSR0_TINT);
@@ -157,11 +158,11 @@ int do_transmit(void)
             tmd3 |= TX_RTRY;
             put_ram_word(off + 2, tmd1);
             put_ram_word(off + 6, tmd3);
-            fprintf(stderr, "[a2065] TX LOOP+COLL tmd1=%04X tmd3=%04X\n", tmd1, tmd3);
+            DBG("[a2065] TX LOOP+COLL tmd1=%04X tmd3=%04X\n", tmd1, tmd3);
         } else {
             put_ram_word(off + 2, tmd1);
             put_ram_word(off + 6, tmd3);
-            fprintf(stderr, "[a2065] TX LOOP %d bytes\n", outsize);
+            DBG("[a2065] TX LOOP %d bytes\n", outsize);
             gotfunc(transmitbuffer, outsize);
         }
     } else {
@@ -171,7 +172,7 @@ int do_transmit(void)
             registers_get_fakemac(fakemac_buf);
             if (memcmp(transmitbuffer, fakemac_buf, 6) == 0) {
                 coll = 1;
-                fprintf(stderr, "[a2065] TX self-loopback collision\n");
+                DBG("[a2065] TX self-loopback collision\n");
             }
         }
         if (coll) {
@@ -179,7 +180,7 @@ int do_transmit(void)
             tmd3 |= TX_RTRY;
             put_ram_word(off + 2, tmd1);
             put_ram_word(off + 6, tmd3);
-            fprintf(stderr, "[a2065] TX COLL tmd1=%04X tmd3=%04X\n", tmd1, tmd3);
+            DBG("[a2065] TX COLL tmd1=%04X tmd3=%04X\n", tmd1, tmd3);
         } else {
             put_ram_word(off + 2, tmd1);
             put_ram_word(off + 6, tmd3);
@@ -188,7 +189,7 @@ int do_transmit(void)
             transmitlen = outsize;
             mungepacket(transmitbuffer, transmitlen);
             ethernet_send(transmitbuffer, transmitlen);
-            fprintf(stderr, "[a2065] TX %d bytes DST=%02X:%02X:%02X:%02X:%02X:%02X\n",
+            DBG("[a2065] TX %d bytes DST=%02X:%02X:%02X:%02X:%02X:%02X\n",
                     transmitlen,
                     transmitbuffer[0], transmitbuffer[1], transmitbuffer[2],
                     transmitbuffer[3], transmitbuffer[4], transmitbuffer[5]);
@@ -206,7 +207,7 @@ void rings_reset_loopback_count(void) { loopback_iter = 0; }
 void gotfunc(const uint8_t *databuf, int len)
 {
     if (registers_mode() & MODE_LOOP)
-        fprintf(stderr, "[a2065] gotfunc entry len=%d csr0=%04X\n", len, registers_csr0());
+        DBG("[a2065] gotfunc entry len=%d csr0=%04X\n", len, registers_csr0());
     int i, insize = 0, first = 1, size;
     uint32_t addr, off;
     uint16_t rmd0, rmd1, rmd2, rmd3;
@@ -218,13 +219,13 @@ void gotfunc(const uint8_t *databuf, int len)
 
     if (!(registers_csr0() & CSR0_RXON)) {
         if (registers_mode() & MODE_LOOP)
-            fprintf(stderr, "[a2065] RX LOOP skip: RXON off csr0=%04X\n", registers_csr0());
+            DBG("[a2065] RX LOOP skip: RXON off csr0=%04X\n", registers_csr0());
         return;
     }
-    if (len < 20) { fprintf(stderr, "[a2065] RX LOOP skip: len=%d < 20\n", len); return; }
+    if (len < 20) { DBG("[a2065] RX LOOP skip: len=%d < 20\n", len); return; }
     uint32_t rdr_rlen = registers_rdr_rlen();
-    if (!rdr_rlen || rdr_rlen > 512) { fprintf(stderr, "[a2065] RX skip: bad rdr_rlen=%u\n", rdr_rlen); return; }
-    if (registers_rdr_rdra() + (rdr_rlen - 1) * 8 > RAM_MASK) { fprintf(stderr, "[a2065] RX skip: rdr overflow\n"); return; }
+    if (!rdr_rlen || rdr_rlen > 512) { DBG("[a2065] RX skip: bad rdr_rlen=%u\n", rdr_rlen); return; }
+    if (registers_rdr_rdra() + (rdr_rlen - 1) * 8 > RAM_MASK) { DBG("[a2065] RX skip: rdr overflow\n"); return; }
 
     registers_get_fakemac(fakemac_buf);
 
@@ -277,7 +278,7 @@ void gotfunc(const uint8_t *databuf, int len)
         addr &= RAM_MASK;
 
         if (!(rmd1 & RX_OWN)) {
-            fprintf(stderr, "[a2065] RX buffer error\n");
+            DBG("[a2065] RX buffer error\n");
             if (!first) {
                 rmd1 |= RX_BUFF | RX_OFLO;
                 registers_csr0_clr(CSR0_RXON);
@@ -313,8 +314,8 @@ void gotfunc(const uint8_t *databuf, int len)
     rethink();
     if (registers_mode() & MODE_LOOP) {
         loopback_iter++;
-        fprintf(stderr, "[a2065] RX LOOP OK #%d %d bytes\n", loopback_iter, len - 4);
+        DBG("[a2065] RX LOOP OK #%d %d bytes\n", loopback_iter, len - 4);
     } else {
-        fprintf(stderr, "[a2065] RX %d bytes\n", len - 4);
+        DBG("[a2065] RX %d bytes\n", len - 4);
     }
 }

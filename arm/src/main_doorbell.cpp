@@ -1,4 +1,5 @@
 #include "a2065_types.h"
+#include "a2065_debug.h"
 #include "a2065_ddr3_flat.h"
 #include "boardram_access.h"
 #include <stdio.h>
@@ -116,7 +117,7 @@ static void write_mbx_mac(const uint8_t *fakemac)
     val |= ((uint64_t)fakemac[4]) << 48;
     val |= ((uint64_t)fakemac[5]) << 56;
     wr64(DDR3_MAC_OFF, val);
-    fprintf(stderr, "[doorbell] MBX_MAC written: %02X:%02X:%02X:%02X (raw=0x%016llX)\n",
+    DBG("[doorbell] MBX_MAC written: %02X:%02X:%02X:%02X (raw=0x%016llX)\n",
             fakemac[2], fakemac[3], fakemac[4], fakemac[5],
             (unsigned long long)val);
 }
@@ -141,7 +142,7 @@ static void daemon_set_default_mac(void)
     mac_set_addresses(fakemac, realmac);
     registers_set_fakemac(fakemac);
 
-    fprintf(stderr, "[doorbell] fakemac=%02X:%02X:%02X:%02X:%02X:%02X\n",
+    DBG("[doorbell] fakemac=%02X:%02X:%02X:%02X:%02X:%02X\n",
             fakemac[0], fakemac[1], fakemac[2],
             fakemac[3], fakemac[4], fakemac[5]);
 }
@@ -203,6 +204,8 @@ int main(int argc, char *argv[])
             iface = argv[++i];
         else if (!strcmp(argv[i], "--test-boardram"))
             do_test_boardram = 1;
+        else if (!strcmp(argv[i], "--debug") || !strcmp(argv[i], "-d"))
+            a2065_debug = 1;
     }
 
     signal(SIGINT,  handle_signal);
@@ -263,13 +266,23 @@ int main(int argc, char *argv[])
         return 1;
     }
 
+    int dbg_cnt = 0;
+    int poll_cnt = 0;
+    int idle = 0;
+
     fprintf(stderr, "[a2065d doorbell] Running — polling CMD slot\n");
 
     while (running) {
         uint64_t cmd = rd64(DDR3_CMD_OFF);
         if (cmd & DDR3_CMD_PENDING_BIT) {
+            idle = 0;
             uint8_t  rap_v = (cmd >> DDR3_CMD_RAP_SHIFT) & DDR3_CMD_RAP_MASK;
             uint16_t data  = (cmd >> DDR3_CMD_DATA_SHIFT) & DDR3_CMD_DATA_MASK;
+
+            if (dbg_cnt < 5000)
+                DBG("[cmd %d] raw=0x%016llX rap=%u data=%04X\n",
+                        dbg_cnt, (unsigned long long)cmd, rap_v, data);
+            dbg_cnt++;
 
             registers_lock();
             chip_wput(A2065_RAP_OFF, rap_v);
@@ -281,6 +294,28 @@ int main(int argc, char *argv[])
 
             push_csr_shadow();
             update_int_state();
+        } else {
+            /* Adaptive backoff. An RDP write is DTACK-stretched by the FPGA
+             * until we drain the CMD slot, so latency matters while active —
+             * spin. As idle grows, nap to free the core for other tasks; any
+             * CMD resets to spin. Worst-case extra register-write latency is
+             * one nap (<=200us), harmless for the AmigaOS control path. RX and
+             * interrupts are unaffected (blocking rx_thread + rethink callback). */
+            if (idle < 1000) {
+                idle++;                 /* hot: pure spin, sub-us latency */
+            } else if (idle < 50000) {
+                idle++;
+                usleep(20);             /* warm: brief naps */
+            } else {
+                usleep(200);            /* idle: yield the core */
+            }
+        }
+        poll_cnt++;
+        if (poll_cnt % 10000000 == 0) {
+            DBG("[doorbell] poll %d: CMD=0x%016llX CSR=0x%016llX INT=0x%016llX\n",
+                    poll_cnt, (unsigned long long)cmd,
+                    (unsigned long long)rd64(DDR3_CSR_OFF),
+                    (unsigned long long)rd64(DDR3_INT_OFF));
         }
     }
 
