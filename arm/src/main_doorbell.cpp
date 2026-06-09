@@ -243,7 +243,7 @@ int main(int argc, char *argv[])
     registers_set_on_interrupt(on_interrupt_cb);
     registers_set_on_transmit(on_transmit_cb);
 
-    if (!ethernet_open(iface, 0)) {
+    if (!ethernet_open(iface, 1)) {
         LOG("[a2065d doorbell] Failed to open %s, continuing without network\n", iface);
     }
 

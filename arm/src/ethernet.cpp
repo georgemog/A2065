@@ -48,6 +48,18 @@ int ethernet_open(const char *iface, int promiscuous)
     if (ioctl(sock_fd, SIOCGIFHWADDR, &ifr) == 0)
         memcpy(host_mac, ifr.ifr_hwaddr.sa_data, 6);
 
+    /* Bring the interface up. The A2065's wire side (eth1) is often admin-down
+     * after boot; raw send/recv fail with "Network is down" until IFF_UP is set. */
+    if (ioctl(sock_fd, SIOCGIFFLAGS, &ifr) == 0) {
+        if (!(ifr.ifr_flags & IFF_UP)) {
+            ifr.ifr_flags |= IFF_UP;
+            if (ioctl(sock_fd, SIOCSIFFLAGS, &ifr) < 0)
+                perror("[a2065] SIOCSIFFLAGS (up)");
+            else
+                LOG("[a2065] Brought %s up\n", iface);
+        }
+    }
+
     memset(&addr, 0, sizeof addr);
     addr.sll_family   = AF_PACKET;
     addr.sll_protocol = htons(ETH_P_ALL);
