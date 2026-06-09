@@ -9,7 +9,7 @@
  * debug output is enabled, so the hot paths stay quiet by default. */
 extern int a2065_debug;
 
-/* Writes a "yyyyddmm-hhmmss.xxx " timestamp prefix to stderr (local time,
+/* Writes a "yyyymmdd-hhmmss.xxx " timestamp prefix to stderr (local time,
  * milliseconds). Defined in registers.cpp. */
 void a2065_log_prefix(void);
 
