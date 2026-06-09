@@ -8,6 +8,7 @@
  */
 
 #include "a2065_types.h"
+#include "a2065_debug.h"
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
@@ -64,7 +65,7 @@ int ethernet_open(const char *iface, int promiscuous)
         setsockopt(sock_fd, SOL_PACKET, PACKET_ADD_MEMBERSHIP, &mreq, sizeof mreq);
     }
 
-    fprintf(stderr, "[a2065] Opened %s idx=%d MAC=%02X:%02X:%02X:%02X:%02X:%02X\n",
+    LOG("[a2065] Opened %s idx=%d MAC=%02X:%02X:%02X:%02X:%02X:%02X\n",
             iface, ifindex,
             host_mac[0], host_mac[1], host_mac[2],
             host_mac[3], host_mac[4], host_mac[5]);
@@ -104,7 +105,7 @@ void ethernet_get_mac(uint8_t *mac_out)
 int ethernet_open(const char *iface, int promiscuous)
 {
     (void)iface; (void)promiscuous;
-    fprintf(stderr, "[a2065] ethernet: stub (non-Linux build)\n");
+    LOG("[a2065] ethernet: stub (non-Linux build)\n");
     return 1;
 }
 

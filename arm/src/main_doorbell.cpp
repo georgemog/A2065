@@ -211,7 +211,7 @@ int main(int argc, char *argv[])
     signal(SIGINT,  handle_signal);
     signal(SIGTERM, handle_signal);
 
-    fprintf(stderr, "[a2065d doorbell] Starting: iface=%s\n", iface);
+    LOG("[a2065d doorbell] Starting: iface=%s\n", iface);
 
     ddr3_fd = open("/dev/mem", O_RDWR | O_SYNC);
     if (ddr3_fd < 0) { perror("open /dev/mem"); return 1; }
@@ -221,7 +221,7 @@ int main(int argc, char *argv[])
                                     MAP_SHARED, ddr3_fd, DDR3_FLAT_BASE);
     if (map == MAP_FAILED) { perror("mmap DDR3"); close(ddr3_fd); return 1; }
 
-    fprintf(stderr, "[a2065d doorbell] Mapped DDR3 at 0x%08lX (+0x%lX)\n",
+    LOG("[a2065d doorbell] Mapped DDR3 at 0x%08lX (+0x%lX)\n",
             (unsigned long)DDR3_FLAT_BASE, (unsigned long)DDR3_FLAT_WINDOW_SIZE);
 
     boardram = map + DDR3_BRAM_OFF;
@@ -244,7 +244,7 @@ int main(int argc, char *argv[])
     registers_set_on_transmit(on_transmit_cb);
 
     if (!ethernet_open(iface, 0)) {
-        fprintf(stderr, "[a2065d doorbell] Failed to open %s, continuing without network\n", iface);
+        LOG("[a2065d doorbell] Failed to open %s, continuing without network\n", iface);
     }
 
     daemon_set_default_mac();
@@ -270,7 +270,7 @@ int main(int argc, char *argv[])
     int poll_cnt = 0;
     int idle = 0;
 
-    fprintf(stderr, "[a2065d doorbell] Running — polling CMD slot\n");
+    LOG("[a2065d doorbell] Running — polling CMD slot\n");
 
     while (running) {
         uint64_t cmd = rd64(DDR3_CMD_OFF);
@@ -326,6 +326,6 @@ int main(int argc, char *argv[])
     munmap((void *)map, DDR3_FLAT_WINDOW_SIZE);
     close(ddr3_fd);
 
-    fprintf(stderr, "[a2065d doorbell] Stopped.\n");
+    LOG("[a2065d doorbell] Stopped.\n");
     return 0;
 }

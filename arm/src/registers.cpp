@@ -17,9 +17,23 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <time.h>
+#include <sys/time.h>
 
 /* Runtime debug switch (see a2065_debug.h). Shared by all daemon builds. */
 int a2065_debug = 0;
+
+/* "yyyyddmm-hhmmss.xxx " timestamp prefix (local time, milliseconds). */
+void a2065_log_prefix(void)
+{
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    struct tm tmv;
+    localtime_r(&tv.tv_sec, &tmv);
+    fprintf(stderr, "%04d%02d%02d-%02d%02d%02d.%03d ",
+            tmv.tm_year + 1900, tmv.tm_mday, tmv.tm_mon + 1,
+            tmv.tm_hour, tmv.tm_min, tmv.tm_sec, (int)(tv.tv_usec / 1000));
+}
 
 /* ── Internal state ────────────────────────────────────────────────── */
 static volatile uint16_t csr[RAP_SIZE];

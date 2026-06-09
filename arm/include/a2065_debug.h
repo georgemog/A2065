@@ -9,6 +9,13 @@
  * debug output is enabled, so the hot paths stay quiet by default. */
 extern int a2065_debug;
 
-#define DBG(...) do { if (a2065_debug) fprintf(stderr, __VA_ARGS__); } while (0)
+/* Writes a "yyyyddmm-hhmmss.xxx " timestamp prefix to stderr (local time,
+ * milliseconds). Defined in registers.cpp. */
+void a2065_log_prefix(void);
+
+/* LOG: always emitted (lifecycle/errors). DBG: only when --debug is on.
+ * Both prefix every line with a timestamp. */
+#define LOG(...) do { a2065_log_prefix(); fprintf(stderr, __VA_ARGS__); } while (0)
+#define DBG(...) do { if (a2065_debug) { a2065_log_prefix(); fprintf(stderr, __VA_ARGS__); } } while (0)
 
 #endif
