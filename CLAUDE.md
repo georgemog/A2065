@@ -106,8 +106,8 @@ A2065/
 | 7 | FPGA boardram window | Done (sim + Quartus) |
 | 8 | FPGA chip register bridge + DTACK stretch | Done (sim + Quartus + MiSTer verified) |
 | 9 | Integration (ARM + FPGA on MiSTer) | **Done** — old bridge: deadlock fix, stale state fix, MAC fix, interrupt generation, CDC bridge_done fix |
-| **10** | **Doorbell architecture** | **DONE** — lance-test **5/5 PASS, "Controller PASSED diagnostics"** (build 20260609a + byteswap daemon). Buffer/Config/Interrupt/Collision/Loopback all PASS. share:a2065_memtest 10/10. Surpasses old-bridge baseline (3/4). |
-| **11** | **Stress test & polish** | Pending |
+| **10** | **Doorbell architecture** | **DONE** — lance-test **5/5 PASS, "Controller PASSED diagnostics"** (build 20260609a + byteswap daemon). Buffer/Config/Interrupt/Collision/Loopback all PASS. share:a2065_memtest 10/10. **External loopback test PASS** (real eth1 frame round-trip). Surpasses old-bridge baseline (3/4). |
+| **11** | **Stress test & polish** | **In Progress** — lance-test x100: 70/70 ALL PASS across two partial runs (no failures); full 100x not yet completed. MAC display cosmetic (issue #3) remains. |
 
 ## DDR3 Mailbox Architecture
 
@@ -288,6 +288,12 @@ Interrupt path:
 - **Diagnosis:** added DOTX/scan logging — `do_transmit` ran but TX ring at the computed `tdra=0x1880` was all zeros, while the real descriptors (TMD OWN|STP) sat at boardram 0x18. The init-block TDRA field bytes `18 80` read big-endian gave 0x1880; little-endian gave 0x8018 → `& RAM_MASK` = 0x18 (where the descriptors actually are). After fix: `mode` reads 0x0044 (was 0x5400), TDRA resolves correctly, all 10 collision sends run.
 - **GOTCHA (cost ~5 build cycles):** a **stale duplicate `src/boardram_access.h` existed only on the build host** (192.168.1.97), not in the repo. Since `registers.cpp`/`rings.cpp` live in `src/` and `#include "boardram_access.h"`, the compiler resolved the same-dir `src/` copy *before* `-I include`, silently ignoring edits to `include/boardram_access.h` (md5 unchanged, `raw[0]` stayed 0x5400). Fix: `rm src/boardram_access.h` on the build host. Verify which header is active with `g++ -I include -E src/registers.cpp | grep get_ram_byte`.
 - **MiSTer verified:** lance-test Buffer/Config/Interrupt/Collision/Loopback **5/5 PASS**, "Controller PASSED diagnostics". memtest still 10/10. Daemon-only change — same FPGA (build 20260609a / `Minimig_20260609a.rbf`).
+
+#### Validation (build 20260609a + byteswap daemon)
+- **lance-test diags:** 5/5 PASS — "Controller PASSED diagnostics".
+- **lance-test loop (External Loopback):** PASS, repeatable. Real frames out eth1 and back — exercises the full TX path (68k → `do_transmit` → `ethernet_send` raw socket → wire → `gotfunc` → RX ring). Confirms actual networking, not just internal loopback sim.
+- **share:a2065_memtest:** 10/10 PASS.
+- **lance-test x100 stress (`tests/run_lance_100x.py`, reloads daemon each run):** 70/70 ALL PASS observed across two partial runs (each interrupted by harness background-task limits, not by test failure). Run env-driven: `A2065_CORE=/media/fat/trans/Minimig_20260609a.rbf A2065_DAEMON=/media/fat/trans/a2065d_doorbell .venv/bin/python run_lance_100x.py 100`. Runner updated: `A2065_DAEMON` env var + derived process name, kills `minimig_netd`, default core = 20260609a. For long unattended runs launch detached (`nohup … &`) since harness background tasks get reaped (`setsid` is unavailable on macOS).
 
 #### Build 20260609a (byte-granular RMW — memtest 10/10)
 - **Result:** SUCCESS, 0 errors, 101 warnings. RBF `Minimig_20260609a.rbf`.
@@ -639,9 +645,10 @@ Also yc_out chroma LUT multicycle constraints (lines 29-34) to fix timing degrad
 
 ## Remaining Work
 
-1. **Fix doorbell buffer test FAIL** — Boardram DDR3 read/write mismatch during lance-test buffer memory test. ARM flat test passes (6/6) but 68k-initiated DDR3 boardram accesses fail. `cpu_rw` write detection fix causes Amiga hang (builds 20260608d/e REGRESSED), so the write detection issue must be solved differently. The `cpu_hwr`/`cpu_lwr` pulsed signals work despite theoretical circular dependency. Need to investigate the actual DDR3 data path for 68k boardram accesses — possibly write data timing, address packing, or DDR3 read-modify-write issue with partial byte enables.
-2. **Run full lance-test diags** — Get Config, Interrupt, Collision, Loopback tests running with doorbell architecture (blocked on buffer test fix).
-3. **Investigate MAC byte ordering** — lance-test shows `00:FFFFFF80:10:00:00:00` (sign-extension of 0x80 byte)
-4. **Test AddNetInterface A2065** — real AmigaOS driver test with doorbell daemon
-5. **Stress test & polish** (Step 11) — extended run stability, packet throughput
-6. **Connect cpu_berr_n** — watchdog timeout should generate BERR, not return $0000
+**Done (this work):** doorbell buffer test fixed (AS+DS capture), INIT back-pressure (IDON/Config), byteenable + byte-granular RMW, daemon byteswap (Collision). Full lance-test diags **5/5 PASS**, External Loopback PASS, memtest 10/10. Steps 0-10 complete.
+
+1. **Complete the full lance-test x100** — two partial runs hit 70/70 ALL PASS but neither reached 100 (harness reaped the background task). Run detached and let it finish for a clean 100-run report.
+2. **MAC display byte ordering** (cosmetic) — lance-test shows `00:FFFFFF80:10:00:00:00` (sign-extension of the 0x80 byte in the PROM-display path). Doesn't affect operation; ethernet works.
+3. **Test AddNetInterface A2065** — real AmigaOS TCP/IP stack (Roadshow/AmiTCP) over the doorbell daemon.
+4. **Connect cpu_berr_n** — watchdog timeout should generate BERR, not return $0000.
+5. **Packet throughput** — measure/optimize; RDP-write back-pressure adds one daemon round-trip per register write (fine for control, may bound TX rate).
