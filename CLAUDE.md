@@ -277,6 +277,19 @@ Interrupt path:
 - **Change:** `a2065_ddram.v` — `sel_br = sel && cpu_addr[15] && !cpu_as_n && !cpu_ds_n`; `is_write = ~cpu_rw`; gated `cpu_data_out`. `minimig.v` — pass `cpu_r_w`, `_cpu_as`, `_cpu_uds & _cpu_lds`.
 - **MiSTer verified:** lance-test `Buffer memory test PASS` (was FAIL). share:a2065_memtest 7/10: walking-bit PASS, address-uniqueness PASS, post-INIT integrity PASS, CSR STOP/RAP/model-ID PASS. Fails: byte access + odd/even byte independence (RMW word-granular, note 16), CSR0 IDON after INIT (separate interrupt/init issue). lance-test now advances to LANCE configuration test (FAIL — same IDON root cause).
 
+#### Build 20260608i (INIT write back-pressure — 3/4 PASS, matches old-bridge baseline)
+- **Result:** SUCCESS, 0 errors, 101 warnings. RBF `Minimig_20260608i.rbf`.
+- **Change:** end-to-end doorbell back-pressure. `a2065_regfile.v`: RDP writes stretch DTACK (W_IDLE→W_WAIT→W_DONE FSM, `regs_nrdy = wstate==W_WAIT`) until the doorbell is drained; RAP writes stay local, reads stay zero-latency. `a2065_ddr3_mailbox.v`: after posting CMD, poll the DDR3 CMD slot (new S_CMD_POLL_W/S_CMD_POLL_D) until the daemon clears the pending bit, then pulse `cmd_clear`. No daemon change (it already writes CMD slot = 0 after draining).
+- **Root cause fixed:** no-back-pressure single CMD slot lost writes when the 68k outran the daemon drain, dropping the rapid LANCE INIT RAP/RDP sequence (CSR1/CSR2/CSR3 init-addr + CSR0=INIT) → init block never set → CSR0 IDON never asserted.
+- **MiSTer verified:** lance-test **Buffer PASS, LANCE configuration PASS, Interrupt PASS, Collision FAIL (3/4)** — matches old-bridge known-good baseline 20260606a. share:a2065_memtest 8/10: + CSR0 IDON after INIT now PASS. Remaining fails: byte access + odd/even (RMW word-granular).
+
+#### Build 20260609a (byte-granular RMW — memtest 10/10)
+- **Result:** SUCCESS, 0 errors, 101 warnings. RBF `Minimig_20260609a.rbf`.
+- **Change:** byte-enable RMW. `a2065_ddram.v` takes `cpu_uds_n`/`cpu_lds_n`, derives `req_be[1:0] = {~uds_n, ~lds_n}` (high=UDS=D[15:8], low=LDS=D[7:0]), latches `bram_req_be`. `a2065_ddr3_mailbox.v` merges only the enabled byte(s) of the target lane in S_BR_RMW_RD_D. `bram_req_be` threaded minimig.v → Minimig.sv → sys_top.v → mailbox; `_cpu_uds`/`_cpu_lds` passed instead of the combined `ds_n`.
+- **Root cause fixed:** word-granular RMW wrote the full 16-bit `cpu_data_in` even on a 68k byte access, clobbering the untouched byte.
+- **MiSTer verified:** share:a2065_memtest **10/10 PASS** (byte access + odd/even now PASS). lance-test still 3/4 (Collision FAIL — daemon-side, separate).
+- **Commit:** submodule `ff20394`.
+
 ### Old Bridge Builds (branch main)
 
 ### Build 20260507 (register DDR3 round-trip verified)
