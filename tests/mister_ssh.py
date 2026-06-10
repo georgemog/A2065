@@ -3,7 +3,7 @@ from typing import Optional
 
 
 class MiSTerSSH:
-    def __init__(self, host: str = "mister.broadband", username: str = "root", password: str = "1", port: int = 22):
+    def __init__(self, host: str = "192.168.1.29", username: str = "root", password: str = "1", port: int = 22):
         self.host = host
         self.username = username
         self.password = password

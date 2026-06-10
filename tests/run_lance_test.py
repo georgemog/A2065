@@ -21,7 +21,7 @@ import time
 import sys
 import argparse
 
-MISTER = "mister.broadband"
+MISTER = "192.168.1.29"
 RBF_DEFAULT = "/media/fat/Minimig_20260525a.rbf"
 DAEMON = "/media/fat/trans/a2065d_ddr3"
 DAEMON_LOG = "/tmp/a2065d.log"

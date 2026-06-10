@@ -21,7 +21,7 @@ termios.tcsetattr(fd, termios.TCSANOW, a)
 termios.tcflush(fd, termios.TCIOFLUSH)
 
 if command:
-    os.write(fd, command.encode("latin-1") + b"\r\n")
+    os.write(fd, command.encode("latin-1") + b"\r")
 else:
     os.write(fd, b"\r\n")
 

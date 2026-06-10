@@ -1,3 +1,4 @@
 [submodule "Minimig-AGA_MiSTer"]
 	path = Minimig-AGA_MiSTer
-	url = https://github.com/MiSTer-devel/Minimig-AGA_MiSTer
+	url = https://github.com/georgemog/Minimig-AGA_MiSTer
+	branch = a2065-doorbell

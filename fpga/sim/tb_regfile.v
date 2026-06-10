@@ -124,7 +124,7 @@ module tb_regfile;
     task clear_doorbell;
         begin
             cmd_clear = 1'b1;
-            @(posedge clk); #1;
+            repeat(4) @(posedge clk);
             cmd_clear = 1'b0;
             repeat(2) @(posedge clk);
         end
@@ -196,42 +196,35 @@ module tb_regfile;
             $display("  pending=%0b (expected 0) FAIL", cmd_pending); fail = fail + 1;
         end
 
-        /* Test 5: Back-pressure (regs_nrdy while cmd_pending) */
-        $display("Test 5: Back-pressure");
+        /* Test 5: Overwrite pending doorbell (no back-pressure) */
+        $display("Test 5: Overwrite pending doorbell");
         bus_write(RAP_ADDR, 16'h0000);
         bus_write(RDP_ADDR, 16'h0001);
         repeat(2) @(posedge clk);
         if (!cmd_pending) begin
             $display("  doorbell not raised FAIL"); fail = fail + 1;
         end else begin
-            @(negedge clk);
-            cpu_addr = RDP_ADDR; cpu_data_in = 16'h0002;
-            cpu_rw = 1'b0; cpu_as_n = 1'b0; cpu_ds_n = 1'b0;
-            @(posedge clk); #1;
-            if (regs_nrdy) begin
-                $display("  regs_nrdy asserted while pending PASS");
-                pass = pass + 1;
-            end else begin
-                $display("  regs_nrdy not asserted FAIL"); fail = fail + 1;
-            end
-            cmd_clear = 1'b1;
-            @(posedge clk); #1;
-            cmd_clear = 1'b0;
-            @(posedge clk); #1;
             if (!regs_nrdy) begin
-                $display("  regs_nrdy released after clear PASS");
+                $display("  regs_nrdy not asserted (no back-pressure) PASS");
                 pass = pass + 1;
             end else begin
-                $display("  regs_nrdy still asserted FAIL"); fail = fail + 1;
+                $display("  regs_nrdy asserted (expected 0) FAIL"); fail = fail + 1;
             end
+            bus_write(RDP_ADDR, 16'h0002);
+            repeat(2) @(posedge clk);
             if (cmd_data === 16'h0002) begin
-                $display("  second write captured PASS");
+                $display("  second write overwrites pending PASS");
                 pass = pass + 1;
             end else begin
-                $display("  cmd_data=0x%04h FAIL", cmd_data); fail = fail + 1;
+                $display("  cmd_data=0x%04h (expected 0x0002) FAIL", cmd_data);
+                fail = fail + 1;
             end
-            cpu_as_n = 1'b1; cpu_ds_n = 1'b1; cpu_rw = 1'b1;
-            @(negedge clk);
+            if (cmd_pending) begin
+                $display("  cmd_pending still set PASS");
+                pass = pass + 1;
+            end else begin
+                $display("  cmd_pending cleared FAIL"); fail = fail + 1;
+            end
         end
 
         /* Clear doorbell from Test 5 before continuing */

@@ -6,3 +6,34 @@ build/
 *~
 .DS_Store
 arm/mac_test_dbg
+
+# Python / venv
+tests/.venv/
+**/__pycache__/
+*.pyc
+
+# Logs, captures, run artifacts (large, machine-generated)
+logs/
+*.pcap
+tests/lance_logs/*.log
+tests/lance_logs/archive/
+tests/lance_logs/daemon_*.log
+
+# Simulation outputs and compiled testbenches
+*.vcd
+fpga/sim/tb_autoconfig
+fpga/sim/tb_boardram
+fpga/sim/tb_regfile
+
+# Tooling / editor / misc
+.codegraph/
+opencode.json
+lance-test/
+
+# Compiled Amiga/ARM test binaries (keep sources)
+tests/a2065_diag2
+tests/a2065_diag3
+tests/diag4
+tests/hello
+tests/enum_boards
+tests/doorbell_diag

@@ -6,10 +6,10 @@ from mister_ssh import MiSTerSSH
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-DAEMON_PATH = "/media/fat/trans/a2065d_ddr3"
-DIAG_CMD = "share:lance-test diags > share:lance-test.log"
+DAEMON_PATH = os.environ.get("A2065_DAEMON", "/media/fat/trans/a2065d_doorbell")
+DIAG_CMD = "share:lance-test diags"
 SERIAL_CMD = os.path.join(BASE_DIR, "serial_long.py")
-CORE_NAME = os.environ.get("A2065_CORE", "Minimig_20260525b.rbf")
+CORE_NAME = os.environ.get("A2065_CORE", "/media/fat/trans/Minimig_20260608e.rbf")
 
 
 def _clean_serial(out):
@@ -53,17 +53,18 @@ def test_amiga_booted(ssh):
 
 @pytest.fixture(scope="module")
 def diag_output(ssh):
-    ssh.execute(f"killall a2065d_ddr3 2>/dev/null; sleep 1", timeout=5)
+    daemon_name = os.path.basename(DAEMON_PATH)
+    ssh.execute(f"killall {daemon_name} 2>/dev/null; sleep 1", timeout=5)
     ssh.execute(
         f"nohup {DAEMON_PATH} --iface eth1 > /tmp/a2065d.log 2>&1 &", timeout=5
     )
     time.sleep(10)
 
-    out, _, _ = ssh.execute("ps -ef | grep a2065d_ddr3 | grep -v grep")
-    assert "a2065d" in out, f"ARM daemon did not start: {out}"
+    out, _, _ = ssh.execute(f"ps -ef | grep {daemon_name} | grep -v grep")
+    assert daemon_name in out, f"ARM daemon did not start: {out}"
 
     log, _, _ = ssh.execute("cat /tmp/a2065d.log")
-    print(f"\n--- a2065d_ddr3 startup log ---\n{log}\n")
+    print(f"\n--- {daemon_name} startup log ---\n{log}\n")
 
     sftp = ssh._client.open_sftp()
     sftp.put(SERIAL_CMD, "/tmp/serial_long.py")
@@ -75,13 +76,8 @@ def diag_output(ssh):
     cleaned = _clean_serial(out)
     print(f"\n--- lance-test diags output ---\n{cleaned}\n")
 
-    time.sleep(60)
-
     a2065d_log, _, _ = ssh.execute("cat /tmp/a2065d.log")
     print(f"\n--- a2065d.log ---\n{a2065d_log}\n")
-
-    lance_log, _, _ = ssh.execute("cat /media/usb0/games/Amiga/shared/lance-test.log")
-    print(f"\n--- lance-test.log ---\n{lance_log}\n")
 
     yield cleaned
 

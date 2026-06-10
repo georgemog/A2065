@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>A2065 Ethernet Emulation for Minimig MiSTer — Project &amp; Status</title>
+<style>
+  :root {
+    --bg: #0f1419;
+    --panel: #1a212b;
+    --panel-2: #222c38;
+    --ink: #d7e0ea;
+    --muted: #8a99ac;
+    --accent: #4fc3f7;
+    --accent-2: #ffb74d;
+    --good: #66bb6a;
+    --bad: #ef5350;
+    --warn: #ffca28;
+    --border: #2c3a49;
+    --mono: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.6;
+  }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 0 24px 80px; }
+  header.hero {
+    background: linear-gradient(135deg, #122230 0%, #0f1419 60%);
+    border-bottom: 1px solid var(--border);
+    padding: 64px 24px 48px;
+    text-align: center;
+  }
+  header.hero h1 { margin: 0 0 12px; font-size: 2.4rem; letter-spacing: -0.5px; }
+  header.hero p.sub { margin: 0 auto; max-width: 640px; color: var(--muted); font-size: 1.05rem; }
+  .badges { margin-top: 24px; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+  .badge {
+    font-family: var(--mono); font-size: 0.8rem; padding: 5px 12px; border-radius: 20px;
+    border: 1px solid var(--border); background: var(--panel);
+  }
+  .badge.green { color: var(--good); border-color: #2e5a32; }
+  .badge.amber { color: var(--accent-2); border-color: #6b4f1f; }
+  .badge.blue { color: var(--accent); border-color: #1f4a5e; }
+  h2 {
+    margin-top: 56px; font-size: 1.5rem; padding-bottom: 8px;
+    border-bottom: 2px solid var(--border);
+  }
+  h2 .num { color: var(--accent); font-family: var(--mono); margin-right: 10px; }
+  h3 { margin-top: 32px; font-size: 1.15rem; color: var(--accent-2); }
+  p { color: var(--ink); }
+  .lead { font-size: 1.08rem; color: var(--muted); }
+  code {
+    font-family: var(--mono); font-size: 0.86em; background: var(--panel-2);
+    padding: 2px 6px; border-radius: 4px; color: #e3eaf2;
+  }
+  pre {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+    padding: 16px; overflow-x: auto; font-family: var(--mono); font-size: 0.82rem;
+    color: #cdd9e5; line-height: 1.5;
+  }
+  pre code { background: none; padding: 0; }
+  .grid { display: grid; gap: 16px; }
+  .cols-2 { grid-template-columns: 1fr 1fr; }
+  .cols-3 { grid-template-columns: repeat(3, 1fr); }
+  @media (max-width: 720px){ .cols-2,.cols-3 { grid-template-columns: 1fr; } }
+  .card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 18px 20px;
+  }
+  .card h4 { margin: 0 0 8px; color: var(--accent); font-size: 1rem; }
+  .card p { margin: 0; color: var(--muted); font-size: 0.92rem; }
+  table { width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 0.9rem; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); }
+  th { color: var(--accent); font-weight: 600; background: var(--panel); }
+  tr:hover td { background: rgba(255,255,255,0.02); }
+  .tag { font-family: var(--mono); font-size: 0.78rem; padding: 2px 8px; border-radius: 12px; white-space: nowrap; }
+  .tag.done { background: rgba(102,187,106,0.15); color: var(--good); }
+  .tag.wip  { background: rgba(255,202,40,0.15); color: var(--warn); }
+  .tag.todo { background: rgba(138,153,172,0.15); color: var(--muted); }
+  .pass { color: var(--good); font-weight: 600; }
+  .fail { color: var(--bad); font-weight: 600; }
+  .callout {
+    border-left: 3px solid var(--accent); background: var(--panel);
+    padding: 14px 18px; border-radius: 0 8px 8px 0; margin: 20px 0;
+  }
+  .callout.warn { border-left-color: var(--warn); }
+  .callout.good { border-left-color: var(--good); }
+  .callout strong { color: var(--accent); }
+  ul.clean { list-style: none; padding-left: 0; }
+  ul.clean li { padding: 6px 0 6px 26px; position: relative; }
+  ul.clean li::before { content: "▸"; position: absolute; left: 4px; color: var(--accent); }
+  .ascii { font-size: 0.74rem; line-height: 1.35; }
+  footer { margin-top: 64px; padding-top: 24px; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.85rem; text-align: center; }
+  .metric-row { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 16px; }
+  .metric { flex: 1; min-width: 130px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px; text-align: center; }
+  .metric .big { font-size: 1.8rem; font-weight: 700; color: var(--good); display: block; }
+  .metric .lbl { font-size: 0.8rem; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <h1>A2065 Ethernet Emulation for Minimig MiSTer</h1>
+  <p class="sub">Full hardware emulation of the Commodore A2065 ZorroII Ethernet card on the
+  Minimig FPGA core (DE10-Nano / Cyclone V). Runs stock AmigaOS drivers — no custom Amiga-side software.</p>
+  <div class="badges">
+    <span class="badge green">Status: Steps 0–11 Complete</span>
+    <span class="badge blue">Branch: simplification/flat-ddr3-doorbell</span>
+    <span class="badge amber">Updated: 2026-06-09</span>
+  </div>
+</header>
+
+<div class="wrap">
+
+<h2><span class="num">01</span>What It Is</h2>
+<p class="lead">
+The A2065 was Commodore's Zorro II Ethernet card built around the AMD Am7990 LANCE controller.
+This project re-creates that card entirely in the MiSTer Minimig core — FPGA fabric plus an ARM
+Linux daemon — so a virtual Amiga can talk to a real network through stock AmigaOS A2065 drivers.
+It is a port of Amiberry's <code>a2065.cpp</code> (Toni Wilen, 2009) from emulator-space onto real hardware.
+</p>
+
+<div class="grid cols-3">
+  <div class="card">
+    <h4>Target Chip</h4>
+    <p>AMD Am7990 LANCE Ethernet controller. CSR register file, TX/RX descriptor rings, 32KB boardram.</p>
+  </div>
+  <div class="card">
+    <h4>Card Identity</h4>
+    <p>Zorro II, 64KB space, manufacturer ID <code>0x0202</code>, product <code>0x70</code>, MAC OUI <code>00:80:10</code>.</p>
+  </div>
+  <div class="card">
+    <h4>No Amiga Software</h4>
+    <p>Uses the standard AmigaOS A2065 SANA-II driver. Looks like a real card to Workbench &amp; TCP/IP stacks.</p>
+  </div>
+</div>
+
+<h2><span class="num">02</span>Full Architecture</h2>
+<p>Work splits across two compute domains living on one DE10-Nano SoC plus a USB NIC. The
+<strong>FPGA fabric</strong> (Cyclone V) presents the card to the Amiga 68000; the <strong>ARM Linux daemon</strong>
+(Cortex-A9 HPS) runs the LANCE state machine and talks to the wire; a <strong>DDR3 shared-memory bridge</strong>
+ties the two domains together; a <strong>USB Ethernet adapter in promiscuous mode</strong> is the physical wire.</p>
+
+<div class="grid cols-3">
+  <div class="card">
+    <h4>FPGA Fabric (Cyclone V)</h4>
+    <p>Zorro II autoconfig, flat DDR3 boardram window, CSR regfile + doorbell (zero-latency reads,
+    async writes to ARM), INT2 interrupt generation. Clock domains <code>clk_sys</code> (68k) and
+    <code>clk_audio</code> (mailbox/DDR3), bridged by CDC synchronizers.</p>
+  </div>
+  <div class="card">
+    <h4>ARM Linux Daemon (HPS)</h4>
+    <p>Am7990 CSR state machine, TX/RX descriptor ring walker, raw Ethernet socket (<code>AF_PACKET</code>),
+    boardram via DDR3 flat window, interrupt state via CSR shadow, MAC translation in both directions.</p>
+  </div>
+  <div class="card">
+    <h4>DDR3 Bridge</h4>
+    <p>Shared memory over the <code>f2sdram2</code> Avalon port (already used for audio/PAL),
+    round-robin arbitrated. The HPS2FPGA AXI bridge was abandoned — non-functional on MiSTer.</p>
+  </div>
+</div>
+
+<h3>End-to-End Stack</h3>
+<p>A frame's full journey, top (virtual Amiga) to bottom (physical LAN). The boundary between the FPGA
+and ARM domains is the DDR3 bridge; the boundary between the daemon and the LAN is the raw socket on the USB NIC.</p>
+
+<pre class="ascii"><code>┌─────────────────────────────────────────────────────────────────────┐
+│  AmigaOS  ·  stock A2065 SANA-II driver  ·  TCP/IP stack (Roadshow)  │  software
+├─────────────────────────────────────────────────────────────────────┤
+│  Motorola 68000  ·  Zorro II bus cycles to card window $EAxxxx       │  emulated CPU
+╞═════════════════════════════════════════════════════════════════════╡  ── FPGA (Cyclone V) ──
+│  a2065_autoconfig   ZorroII ROM → base address latched               │  clk_sys
+│  a2065_regfile      CSR reads (combinational from shadow) + doorbell  │
+│  a2065_ddram        32KB boardram window, AS+DS-qualified capture     │
+│  CDC 2-stage  ←→  a2065_ddr3_mailbox FSM  ·  avalon_arbiter           │  clk_audio
+╞═════════════════════════════════════════════════════════════════════╡  ── DDR3 shared memory ──
+│  f2sdram2 Avalon port  @ 0x1FF00000 : boardram | CMD | CSR | INT | MAC │
+╞═════════════════════════════════════════════════════════════════════╡  ── ARM Linux (HPS) ──
+│  a2065d_doorbell   poll CMD slot → chip_wput() → push CSR shadow/INT  │  main thread
+│  registers.cpp     Am7990 CSR0/1/2/3 state machine, INIT block parse  │
+│  rings.cpp         TX/RX descriptor ring walker (TDRA / RDRA)         │
+│  mac.cpp           mungepacket(): fakemac 00:80:10:.. ↔ host realmac  │
+│  ethernet.cpp      AF_PACKET SOCK_RAW  ·  send() / recv()             │  RX thread (gotfunc)
+╞═════════════════════════════════════════════════════════════════════╡
+│  USB Ethernet adapter (eth1)  ·  PROMISCUOUS mode  ·  IFF_UP forced   │  physical NIC
+├─────────────────────────────────────────────────────────────────────┤
+│  Physical LAN  ·  switch  ·  DHCP server, peers                       │  the wire
+└─────────────────────────────────────────────────────────────────────┘</code></pre>
+
+<h3>Why DDR3 instead of HPS2FPGA</h3>
+<p>The HPS2FPGA lightweight bridge proved non-functional on MiSTer for this use case. The DDR3 approach
+reuses the existing <code>f2sdram2</code> Avalon port, shared with the audio/PAL service via a round-robin
+arbiter. Verified working since build 20260507.</p>
+
+<h2><span class="num">02b</span>Network Path &amp; Promiscuous Mode</h2>
+<p>The Amiga side believes it owns a real A2065 with its own MAC. The wire side is a generic USB Ethernet
+adapter whose MAC differs. Two mechanisms reconcile them: <strong>promiscuous mode</strong> on the NIC, and
+<strong>MAC translation</strong> in the daemon.</p>
+
+<div class="grid cols-2">
+  <div class="card">
+    <h4>Raw socket on the USB NIC</h4>
+    <p><code>ethernet.cpp</code> opens <code>socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ALL))</code> bound to
+    <code>eth1</code> via <code>sockaddr_ll</code>. This bypasses the host kernel's IP stack entirely — the
+    daemon sees and sends complete Ethernet frames (header + payload + the 68k's own FCS handling). The
+    interface is forced <code>IFF_UP</code> at open since the USB NIC is often admin-down after boot.</p>
+  </div>
+  <div class="card">
+    <h4>Promiscuous mode — why it's required</h4>
+    <p>The Amiga's card MAC (<code>00:80:10:XX:XX:XX</code>) is <em>not</em> the USB adapter's hardware MAC.
+    By default the NIC drops frames not addressed to its own MAC, so replies to the Amiga would never arrive.
+    Setting <code>PACKET_MR_PROMISC</code> via <code>setsockopt(... PACKET_ADD_MEMBERSHIP ...)</code> tells the
+    adapter to deliver <strong>every</strong> frame on the wire to the socket, letting the daemon catch the
+    Amiga's traffic regardless of destination MAC.</p>
+  </div>
+</div>
+
+<h3>MAC translation (<code>mungepacket</code>)</h3>
+<p>Promiscuous capture is only half the trick — the addresses on the wire must still be coherent.
+<code>mac.cpp</code> maintains two MACs and rewrites every frame in both directions:</p>
+<ul class="clean">
+  <li><strong>fakemac</strong> <code>00:80:10:XX:XX:XX</code> — Commodore OUI, the MAC the AmigaOS driver thinks it has.</li>
+  <li><strong>realmac</strong> — the host USB-NIC MAC with its OUI forced to <code>00:80:10</code>.</li>
+  <li><strong>TX path:</strong> frames leaving the Amiga carry <code>fakemac</code> as source → daemon swaps it to <code>realmac</code> before <code>send()</code>, so the LAN/switch sees a consistent, valid source.</li>
+  <li><strong>RX path:</strong> frames arriving for <code>realmac</code> are swapped back to <code>fakemac</code> before being written into the RX ring, so the Amiga recognises them as its own.</li>
+  <li><strong>Deep rewrite:</strong> <code>mungepacket()</code> also fixes ARP sender/target hardware addresses and DHCP <code>CHADDR</code>, recomputing the UDP checksum when CHADDR changes — without this, ARP and DHCP would advertise the wrong MAC and the lease would fail.</li>
+</ul>
+
+<div class="callout warn">
+  <strong>Non-standard kernel required:</strong> the stock MiSTer Linux kernel ships no USB Ethernet drivers —
+  it has only the on-board NIC. This project runs a <strong>custom-built MiSTer kernel with USB NIC support
+  compiled in</strong> (CDC-ECM / ASIX / RTL8152 etc.), which is what enumerates the USB adapter as <code>eth1</code>.
+  Without that kernel there is no wire-side interface for the daemon to bind its raw socket to, and the whole
+  network path is dead. The custom kernel is a hard prerequisite, not an optional convenience.
+</div>
+
+<div class="callout good">
+  <strong>Result:</strong> with the USB-capable kernel + promiscuous capture + bidirectional MAC munging, the
+  virtual Amiga obtains a real DHCP lease and exchanges live traffic over the physical LAN — verified end-to-end
+  via the External Loopback test (frame out <code>eth1</code>, back through <code>gotfunc</code> into the RX ring).
+</div>
+
+<h3>Two Bridge Generations</h3>
+<table>
+  <tr><th>Architecture</th><th>FPGA modules</th><th>Daemon</th><th>Mechanism</th></tr>
+  <tr>
+    <td><strong>Old bridge</strong><br><span class="tag todo">main</span></td>
+    <td><code>a2065_registers.v</code>, <code>a2065_boardram.v</code> (TDP BRAM)</td>
+    <td><code>a2065d_ddr3</code></td>
+    <td>DTACK-stretch + DDR3 mailbox CMD/RSP protocol</td>
+  </tr>
+  <tr>
+    <td><strong>Doorbell</strong><br><span class="tag done">flat-ddr3-doorbell</span></td>
+    <td><code>a2065_regfile.v</code>, <code>a2065_ddram.v</code> (flat DDR3)</td>
+    <td><code>a2065d_doorbell</code></td>
+    <td>Zero-latency CSR reads; RDP writes raise a doorbell ARM polls async</td>
+  </tr>
+</table>
+
+<h2><span class="num">03</span>Doorbell Signal Paths</h2>
+<p>The current (doorbell) architecture. CSR reads are combinational from a shadow the ARM keeps fresh;
+register writes ring a doorbell; boardram rides a flat DDR3 window; interrupts flow ARM→FPGA→Paula.</p>
+
+<pre class="ascii"><code>Register read (zero-latency):
+  68000 → a2065_regfile (combinational from csr_shadow) → data bus OR-tie
+  ARM updates shadow → DDR3 CSR slot → mailbox FSM poll → regfile
+
+Register write (doorbell):
+  68000 → a2065_regfile → cmd_pending/rap/data (level) → mailbox FSM (CDC 2-stage)
+        → DDR3 CMD slot → ARM polls → chip_wput() → push_csr_shadow() → DDR3 CSR slot
+
+Boardram:
+  68000 → a2065_ddram → bram_req_valid (level) → mailbox FSM (CDC 2-stage)
+        → DDR3 read/write → ddram (CDC 2-stage) → cpu_data_out
+
+Interrupt:
+  ARM daemon → push_csr_shadow + update_int_state → DDR3 INT slot
+        → mailbox FSM poll → a2065_int2 → CDC 2-stage → Paula int2 → 68000 level 2</code></pre>
+
+<h3>DDR3 Layout (offsets from <code>DDR3_FLAT_BASE = 0x1FF00000</code>)</h3>
+<table>
+  <tr><th>Offset</th><th>Size</th><th>Purpose</th></tr>
+  <tr><td><code>0x0000</code></td><td>32 KB</td><td>Flat boardram window (4×16-bit per 64-bit DDR3 word)</td></tr>
+  <tr><td><code>0x8000</code></td><td>8 B</td><td>CMD slot: <code>{data[15:0], rap[6:0], pending[0]}</code></td></tr>
+  <tr><td><code>0x8010</code></td><td>8 B</td><td>CSR shadow: <code>{csr3, csr2, csr1, csr0}</code></td></tr>
+  <tr><td><code>0x8018</code></td><td>8 B</td><td>INT state: <code>{int_assert[0]}</code></td></tr>
+  <tr><td><code>0x8028</code></td><td>8 B</td><td>MAC: <code>{mac[47:0], valid[0]}</code></td></tr>
+</table>
+
+<h2><span class="num">04</span>Implementation Status</h2>
+<p>Eleven-step plan. All steps complete through stress test and polish.</p>
+<table>
+  <tr><th>Step</th><th>Description</th><th>Status</th></tr>
+  <tr><td>0</td><td>Bridge protocol &amp; shared types</td><td><span class="tag done">Done</span></td></tr>
+  <tr><td>1</td><td>MAC translation unit (6 tests)</td><td><span class="tag done">Done</span></td></tr>
+  <tr><td>2</td><td>Raw Ethernet socket (skeleton)</td><td><span class="tag done">Done</span></td></tr>
+  <tr><td>3</td><td>CSR state machine (10 tests)</td><td><span class="tag done">Done</span></td></tr>
+  <tr><td>4</td><td>Descriptor ring walker (8 tests)</td><td><span class="tag done">Done</span></td></tr>
+  <tr><td>5</td><td>Full daemon (sim bridge)</td><td><span class="tag done">Done</span></td></tr>
+  <tr><td>6</td><td>FPGA autoconfig (sim + Quartus)</td><td><span class="tag done">Done</span></td></tr>
+  <tr><td>7</td><td>FPGA boardram window</td><td><span class="tag done">Done</span></td></tr>
+  <tr><td>8</td><td>FPGA chip register bridge + DTACK stretch</td><td><span class="tag done">Done</span></td></tr>
+  <tr><td>9</td><td>Integration (ARM + FPGA on MiSTer)</td><td><span class="tag done">Done</span></td></tr>
+  <tr><td>10</td><td>Doorbell architecture — lance-test 5/5 PASS</td><td><span class="tag done">Done</span></td></tr>
+  <tr><td>11</td><td>Stress test &amp; polish — x100: 100/100</td><td><span class="tag done">Done</span></td></tr>
+</table>
+
+<div class="callout good">
+  <strong>Headline result:</strong> lance-test diagnostics <span class="pass">5/5 PASS</span> —
+  "Controller PASSED diagnostics" (build 20260609a + byteswap daemon).
+  Buffer, Config, Interrupt, Collision and Loopback all pass. Surpasses the old-bridge baseline of 3/4.
+</div>
+
+<div class="metric-row">
+  <div class="metric"><span class="big">5/5</span><span class="lbl">lance-test diags PASS</span></div>
+  <div class="metric"><span class="big">100/100</span><span class="lbl">x100 stress runs ALL PASS</span></div>
+  <div class="metric"><span class="big">10/10</span><span class="lbl">a2065_memtest PASS</span></div>
+  <div class="metric"><span class="big">DHCP</span><span class="lbl">real lease on live network</span></div>
+</div>
+
+<h3>Validation detail</h3>
+<ul class="clean">
+  <li><strong>lance-test diags:</strong> Buffer / Config / Interrupt / Collision / Loopback all <span class="pass">PASS</span>.</li>
+  <li><strong>External Loopback:</strong> <span class="pass">PASS</span>, repeatable — real frames out <code>eth1</code> and back through the full TX path (68k → <code>do_transmit</code> → raw socket → wire → <code>gotfunc</code> → RX ring). Confirms actual networking, not sim loopback.</li>
+  <li><strong>a2065_memtest:</strong> <span class="pass">10/10</span> — walking-bit, address-uniqueness, byte access, odd/even independence, post-INIT integrity, CSR checks.</li>
+  <li><strong>x100 stress:</strong> single persistent daemon, all 5 tests at 100%. Report <code>tests/lance_logs/results_100x_20260609_143735.md</code>.</li>
+  <li><strong>AddNetInterface A2065:</strong> a stock AmigaOS TCP/IP stack obtained DHCP lease <code>192.168.1.190</code> with route and DNS, then pinged the network.</li>
+  <li><strong>Daemon footprint:</strong> 2–7% CPU under load, ~2% / 11.7 MB resident, no leak. Adaptive poll backoff dropped idle CPU from ~100% (busy-spin) to ~2–9%; a <code>--debug</code> flag gates verbose logging.</li>
+</ul>
+
+<h2><span class="num">05</span>The Hard Bugs (and Their Fixes)</h2>
+<p>The doorbell port hung on first boot. Three distinct bugs, then a data-path bug, then a byte-order bug —
+each cost build cycles to isolate.</p>
+
+<h3>Three bugs that caused the doorbell hang</h3>
+<div class="grid cols-3">
+  <div class="card">
+    <h4>1 · Back-pressure</h4>
+    <p>Second RDP write saw <code>cmd_pending</code> still set and stretched DTACK forever.
+    <strong>Fix:</strong> <code>regs_nrdy = 0</code> always; new write overwrites the pending doorbell.</p>
+  </div>
+  <div class="card">
+    <h4>2 · ddram nrdy guard</h4>
+    <p><code>nrdy_state</code> could enter <code>NR_WAIT</code> without issuing a DDR3 request → response never arrives → hang.
+    <strong>Fix:</strong> guard the transition with <code>!sys_req &amp;&amp; !sys_got_resp</code>.</p>
+  </div>
+  <div class="card">
+    <h4>3 · Edge-detect miss</h4>
+    <p>One-cycle edge pulse for boardram requests was missed while the FSM serviced other slots.
+    <strong>Fix:</strong> level detection, like the CMD doorbell.</p>
+  </div>
+</div>
+
+<h3>Buffer test — the AS+DS capture fix (build 20260608h)</h3>
+<div class="callout">
+  Root cause: capturing the boardram request on raw <code>sel_br = sel &amp;&amp; cpu_addr[15]</code> samples during the
+  <em>address</em> phase — before write strobes and write data are valid. Direction and data were both read too early.
+  <br><br>
+  <strong>Fix:</strong> <code>sel_br = sel &amp;&amp; cpu_addr[15] &amp;&amp; !cpu_as_n &amp;&amp; !cpu_ds_n</code> and
+  <code>is_write = ~cpu_rw</code>. DS deasserts between cycles, giving a clean <code>NR_DONE→NR_IDLE</code> separation.
+  The earlier <code>cpu_rw</code> attempts failed only because they kept raw <code>sel_br</code> with no DS qualification.
+</div>
+
+<h3>Collision test — daemon byteswap</h3>
+<p>The 68k is big-endian; the FPGA stores each 16-bit word little-endian in its DDR3 lane. The daemon read the
+init block byteswapped → wrong TDRA/RDRA → <code>do_transmit</code> found no TX descriptors. Fix: flat accessors XOR
+every byte index with 1 (<code>boardram[(off ^ 1) &amp; RAM_MASK]</code>). After the fix TDRA resolves and all 10 collision sends run.</p>
+
+<div class="callout warn">
+  <strong>Gotcha that cost ~5 build cycles:</strong> a stale duplicate <code>src/boardram_access.h</code> existed
+  only on the build host. Because the <code>.cpp</code> files live in <code>src/</code> and include the header by name,
+  the compiler resolved the same-dir copy <em>before</em> <code>-I include</code>, silently ignoring edits to the real header.
+  Verify the active header with <code>g++ -I include -E src/registers.cpp | grep get_ram_byte</code>.
+</div>
+
+<h2><span class="num">06</span>Critical Design Decisions</h2>
+<ul class="clean">
+  <li><strong>DDR3 mailbox over HPS2FPGA</strong> — the lightweight bridge doesn't work on MiSTer; DDR3 via <code>f2sdram2</code> does.</li>
+  <li><strong>Level detection for all CDC requests</strong> — edge pulses get missed when the FSM is busy; levels never lost.</li>
+  <li><strong>Read-modify-write for boardram</strong> — Quartus can't infer cross-domain TDP M10K from byte arrays; single 16-bit array + RMW with byte enables is the Quartus-friendly pattern.</li>
+  <li><strong>Capture must qualify on AS+DS, not raw select</strong> — raw select is the address phase; data &amp; direction aren't valid yet.</li>
+  <li><strong>No back-pressure on doorbell RDP writes</strong> — the daemon only needs the latest state; new write overwrites pending.</li>
+  <li><strong>Do NOT modify the v5 arbiter</strong> — its burst-tracking "bug" accidentally pins grant to the A2065 master, stopping the PAL service from stealing the bus. Every "fix" regressed.</li>
+  <li><strong>Self-loopback collision detection</strong> — the Am7990 relies on a physical loopback plug; MODE_COLL is never set in the init block, so the daemon detects DST MAC == own MAC and simulates the collision.</li>
+</ul>
+
+<h2><span class="num">07</span>Bring-up Methodology</h2>
+<p>The DDR3 mailbox path was brought up across <strong>8 FPGA builds in one session</strong> using a
+binary-search isolation technique — hardcoded magic return values that pinpoint exactly which stage of the
+multi-stage path fails, without DDR3 muddying the picture.</p>
+<table>
+  <tr><th>Marker</th><th>What it isolates</th><th>Proved</th></tr>
+  <tr><td><code>$DEAD</code></td><td>Watchdog timeout returns 0xDEAD instead of open-bus 0x0000</td><td>Register module triggered vs open-bus read</td></tr>
+  <tr><td><code>$BEEF</code></td><td>DDR3 removed entirely; mailbox returns a constant</td><td>CDC + handshake path works</td></tr>
+  <tr><td><code>$CAFE</code></td><td>DDR3 write restored, read/poll skipped</td><td>Arbiter grants + <code>f2sdram2</code> accepts writes</td></tr>
+</table>
+<p>The remaining gap — DDR3 <em>reads</em> never completing — was then narrowed to two Avalon bugs: the arbiter
+cleared <code>burst_active</code> before <code>readdatavalid</code> arrived (routing the response to the wrong master),
+and the mailbox didn't hold <code>avl_read</code> asserted until <code>!waitrequest</code>. Both classic Avalon
+protocol traps.</p>
+
+<h2><span class="num">08</span>Engineering Lessons</h2>
+<p>Distilled from the journal — the non-obvious traps that cost the most time, kept here so they aren't re-learned.</p>
+<div class="grid cols-2">
+  <div class="card">
+    <h4>Gate capture on the data strobe</h4>
+    <p>A raw chip-select is high during the 68k <em>address</em> phase, before write data and R/W are valid.
+    Qualify request capture with <code>!AS &amp;&amp; !DS</code> and sample <code>cpu_rw</code> then. DS also deasserts
+    between cycles → clean access separation without edge detection.</p>
+  </div>
+  <div class="card">
+    <h4>Endianness bites only cross-domain</h4>
+    <p>68k big-endian words land little-endian in the DDR3 lane. 68k-only tests (memtest, buffer) are
+    self-consistent and pass, hiding the swap. It breaks only when the little-endian daemon parses
+    68k-written structures (init block, descriptors). Fix: XOR the flat byte offset with 1.</p>
+  </div>
+  <div class="card">
+    <h4>A doorbell needs drain confirmation</h4>
+    <p>A single no-back-pressure CMD slot silently drops writes when the producer outruns the consumer —
+    it lost the rapid LANCE INIT RAP/RDP burst. Stretch the producer (DTACK) until the consumer has actually
+    drained, not merely until the value was posted.</p>
+  </div>
+  <div class="card">
+    <h4>The build host is rsync'd, not the repo</h4>
+    <p>A stale <code>src/boardram_access.h</code> existed only on the build machine and shadowed <code>include/</code>
+    (same-dir <code>#include</code> wins over <code>-I</code>). Edits had zero effect, md5 unchanged. When a change
+    "does nothing," preprocess (<code>g++ -E</code>) to see what the compiler actually used.</p>
+  </div>
+  <div class="card">
+    <h4>Avalon read/write burst tracking differs</h4>
+    <p>Writes complete on <code>!waitrequest</code>; reads complete on <code>readdatavalid</code>. The arbiter must
+    track them separately, and masters must hold <code>read</code> asserted until <code>!waitrequest</code> — a
+    single-cycle read pulse is lost if the slave has waitstates.</p>
+  </div>
+  <div class="card">
+    <h4>Address formats &amp; unconnected outputs</h4>
+    <p>Minimig uses <code>wire [23:1]</code> word addresses — reconstruct byte addresses with <code>{addr, 1'b0}</code>.
+    And an unconnected Verilog <code>output</code> is silently ignored: <code>regs_nrdy</code> was declared but unwired,
+    making the whole register module invisible to the DTACK path.</p>
+  </div>
+</div>
+
+<h2><span class="num">09</span>Build &amp; Test Environment</h2>
+<div class="grid cols-2">
+  <div class="card">
+    <h4>Quartus FPGA build</h4>
+    <p><code>nshearman@192.168.1.65</code> · Quartus 17.0 · ~25 min wall.
+    Output <code>Minimig.rbf</code>. Current good build: <code>Minimig_20260609a.rbf</code>.</p>
+  </div>
+  <div class="card">
+    <h4>ARM cross-compile</h4>
+    <p><code>root@192.168.1.97</code> · <code>arm-none-linux-gnueabihf-g++</code> ·
+    <code>make doorbell</code> → <code>a2065d_doorbell</code>.</p>
+  </div>
+  <div class="card">
+    <h4>m68k cross-compile</h4>
+    <p><code>/opt/amiga/bin/m68k-amigaos-gcc</code>. Note: cross-built Amiga binaries run silently/empty on this setup — only the pre-built <code>share:lance-test</code> and shell commands work.</p>
+  </div>
+  <div class="card">
+    <h4>MiSTer target</h4>
+    <p><code>root@192.168.1.29</code>. Deploy to <code>/media/fat/trans/</code>. Serial <code>/dev/ttyS1</code> @ 115200.
+    Core reload via <code>load_core</code> to <code>/dev/MiSTer_cmd</code>.</p>
+  </div>
+</div>
+
+<div class="callout warn">
+  <strong>Operational notes:</strong> use <code>\r</code> (not <code>\r\n</code>) for Amiga serial commands —
+  <code>\n</code> eats the second word. Kill the conflicting init daemon:
+  <code>killall minimig_netd</code> and disable <code>S90minimig_netd</code>. Daemon runs with <code>--iface eth1</code>.
+</div>
+
+<h2><span class="num">10</span>Stress Test &amp; Production Readiness</h2>
+<div class="callout good">
+  <strong>Verdict: stress passed — the A2065 doorbell is production-solid under sustained real-world load.</strong>
+  Networking is fully functional on <strong>both AmigaOS TCP/IP stacks — Roadshow and MiamiDX</strong>. Stable over
+  hours of saturated transfer with no daemon fault, no errors, no drops, no stalls. Steps 0–11 complete.
+</div>
+
+<h3>Evidence (this session)</h3>
+<div class="grid cols-2">
+  <div class="card">
+    <h4>1 · Repeated 100 MB downloads</h4>
+    <p>Linux <code>wget</code> over the A2065, 08:36→09:51 — ~75 min continuous, ~15 back-to-back 100 MB pulls at a
+    steady ~505 KB/s. Every one completed <code>[104857600/104857600]</code>. Zero variance, zero corruption.</p>
+  </div>
+  <div class="card">
+    <h4>2 · Daemon health under load</h4>
+    <p><code>top</code>: steady ~11–12% CPU, RSS flat at 11772 KB start→end (no leak), PID stable, no crash or restart
+    across the whole window.</p>
+  </div>
+  <div class="card">
+    <h4>3 · Amiga-native TCP transfer</h4>
+    <p><code>test-fix.pcap</code> — the Amiga's <em>own</em> stack doing an HTTP GET: 109 MB @ 520 KB/s,
+    0 lost segments, 0 RST, 0.014% retransmit. Clean.</p>
+  </div>
+  <div class="card">
+    <h4>4 · DHCP + ping, both stacks</h4>
+    <p>Roadshow <em>and</em> MiamiDX both lease <code>192.168.1.190</code>; ping 18/18 + 43/43, zero loss.</p>
+  </div>
+</div>
+
+<div class="callout">
+  <strong>Throughput ceiling is the 68000, not the A2065.</strong> ~520 KB/s with zero-window flow control means
+  the 7 MHz CPU simply can't drain the RX ring any faster — the card and DDR3 bridge keep up fine. The bottleneck
+  is the emulated Amiga itself, not the emulated card.
+</div>
+
+<div class="metric-row">
+  <div class="metric"><span class="big">~75 min</span><span class="lbl">continuous saturated transfer</span></div>
+  <div class="metric"><span class="big">~505 KB/s</span><span class="lbl">steady, zero variance</span></div>
+  <div class="metric"><span class="big">11772 KB</span><span class="lbl">RSS flat — no leak</span></div>
+  <div class="metric"><span class="big">0.014%</span><span class="lbl">retransmit, 0 RST</span></div>
+</div>
+
+<h2><span class="num">10b</span>Remaining Work</h2>
+<table>
+  <tr><th>Item</th><th>Kind</th><th>Status</th></tr>
+  <tr><td>Both TCP/IP stacks (Roadshow + MiamiDX) — DHCP + ping + saturated transfer</td><td>Integration</td><td><span class="tag done">Done — both work</span></td></tr>
+  <tr><td>Clean unattended full x100 run (detached, reach 100)</td><td>Validation</td><td><span class="tag done">Done — 100/100</span></td></tr>
+  <tr><td>Issue B — RX multicast flood (LADRF hash filter)</td><td>Correctness</td><td><span class="tag done">Fixed + verified</span></td></tr>
+  <tr><td>Issue A — station MAC low bytes <code>…00:00</code> (collision risk with 2 cards)</td><td>Cosmetic (single card)</td><td><span class="tag wip">Open</span></td></tr>
+  <tr><td>MAC display byte ordering — shows <code>00:FFFFFF80:10:...</code> (sign-extension)</td><td>Cosmetic</td><td><span class="tag wip">Open (issue #3)</span></td></tr>
+  <tr><td>Connect <code>cpu_berr_n</code> — watchdog timeout should raise BERR, not return $0000</td><td>Robustness</td><td><span class="tag todo">TODO (low)</span></td></tr>
+  <tr><td>Packet throughput — bounded by the 68000, not the card</td><td>Performance</td><td><span class="tag done">Characterized</span></td></tr>
+</table>
+<p class="lead" style="font-size:0.95rem">Two non-blocking issues remain: <strong>Issue A</strong> (on-wire MAC low bytes
+<code>00:00</code>) — cosmetic for a single card, a MAC-collision risk only with two A2065 on one LAN; and the MAC
+<em>display</em> sign-extension. <strong>Issue B</strong> (multicast flood) was fixed and verified this session.</p>
+
+<h2><span class="num">11</span>Repository Map</h2>
+<pre><code>A2065/
+├── DESIGN.md / IMPLEMENTATION_PLAN.md   architecture + 11-step plan
+├── arm/                                 ARM Linux daemon (Amiberry port)
+│   ├── src/   registers, rings, mac, ethernet, crc32,
+│   │          main_doorbell.cpp, boardram_remote.cpp, *_test.cpp
+│   └── include/  a2065_bridge.h, a2065_types.h, boardram_access.h
+├── fpga/
+│   ├── rtl/   a2065_top, a2065_autoconfig, a2065_regfile, a2065_ddram
+│   ├── sim/   tb_autoconfig, tb_boardram, tb_regfile (all passing)
+│   └── constraints/  a2065.sdc
+├── tests/   test_lance.py (pytest), run_lance_100x.py, mister_ssh.py, serial_long.py
+├── docs/    AMD_Am7990.pdf, DESIGN_INTERNAL_LOOPBACK.md, Roadshow.md, ...
+└── Minimig-AGA_MiSTer/  submodule — upstream core, modified for A2065
+    └── rtl/A2065/  a2065_regfile.v, a2065_ddram.v, a2065_ddr3_mailbox.v, avalon_arbiter.v</code></pre>
+
+<h3>Minimig core modifications</h3>
+<ul class="clean">
+  <li><code>cpu_wrapper.v</code> — A2065 autoconfig nibbles (type 0xC1, product 0x70, mfr 0x0202), base latched from <code>0xE80048</code>.</li>
+  <li><code>gary.v</code> — <code>sel_a2065 = a2065_ena &amp;&amp; cpu_address_in[23:16]==a2065_base</code>.</li>
+  <li><code>minimig.v</code> — instantiates <code>a2065_regfile</code> + <code>a2065_ddram</code>, OR-ties data mux, 2-stage CDC for INT2 into Paula's <code>int2</code>.</li>
+  <li><code>sys_top.v</code> — <code>a2065_ddr3_mailbox</code> (clk_audio), <code>avalon_arbiter</code> sharing <code>f2sdram2</code>, interrupt wiring.</li>
+</ul>
+
+<footer>
+  A2065 Ethernet Emulation for Minimig MiSTer · Port of Amiberry <code>a2065.cpp</code> (Toni Wilen, 2009) ·
+  Generated 2026-06-09 from project code and documentation.
+</footer>
+
+</div>
+</body>
+</html>
