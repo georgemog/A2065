@@ -374,7 +374,7 @@ python3 -m pytest test_lance.py -v -s
 
 ### Evidence (this session)
 
-1. **Repeated 100 MB downloads** — Linux `wget` over the A2065, 08:36→09:51, ~75 min continuous, ~15 back-to-back
+1. **Repeated 100 MB downloads** — Amiga `wget` command over the A2065, 08:36→09:51, ~75 min continuous, ~15 back-to-back
    100 MB pulls at a steady ~505 KB/s. Every one completed `[104857600/104857600]`. Zero variance, zero corruption.
 2. **Daemon health under load** — `top`: steady ~11–12% CPU, RSS flat at 11772 KB start→end (no leak), PID stable,
    no crash or restart across the whole window.
