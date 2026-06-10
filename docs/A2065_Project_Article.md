@@ -6,9 +6,6 @@ no custom Amiga-side software.
 
 > **Status:** Steps 0–11 Complete · Branch `simplification/flat-ddr3-doorbell` · Updated 2026-06-09
 
-A formatted HTML version of this overview is at [`docs/A2065_Project_Article.html`](docs/A2065_Project_Article.html);
-the Markdown source is [`docs/A2065_Project_Article.md`](docs/A2065_Project_Article.md).
-
 ---
 
 ## 01 · What It Is
@@ -315,53 +312,6 @@ Distilled from the build journal — the non-obvious traps that cost the most ti
 > **Operational notes:** use `\r` (not `\r\n`) for Amiga serial commands — `\n` eats the second word. Kill the
 > conflicting init daemon: `killall minimig_netd` and disable `S90minimig_netd`. Daemon runs with `--iface eth1`.
 
-### Building
-
-```bash
-# ARM daemon — doorbell architecture (cross-compile for MiSTer)
-cd arm
-make doorbell        # uses build/doorbell/ → a2065d_doorbell
-
-# ARM daemon — native build for host-side unit testing
-make native
-./build/native/a2065d --help
-
-# Unit tests
-make test
-
-# FPGA simulation
-cd ../fpga/sim
-make sim_autoconfig  # also: tb_boardram, tb_regfile
-
-# FPGA bitstream (on the Quartus host)
-#   cd ~/Development/Minimig-AGA_MiSTer
-#   /opt/altera/17.0/quartus/bin/quartus_sh --flow compile Minimig
-```
-
-### Deploy to MiSTer
-
-```bash
-# Daemon (kill the old one first; exFAT sync mount may need rm before scp)
-ssh root@192.168.1.29 'killall a2065d_doorbell; rm -f /media/fat/trans/a2065d_doorbell'
-scp arm/build/doorbell/a2065d_doorbell root@192.168.1.29:/media/fat/trans/
-
-# Core
-scp Minimig_20260609a.rbf root@192.168.1.29:/media/fat/
-ssh root@192.168.1.29 "echo 'load_core /media/fat/Minimig_20260609a.rbf' > /dev/MiSTer_cmd"
-
-# Run daemon (USB NIC must enumerate as eth1 — needs the custom kernel)
-ssh root@192.168.1.29 '/media/fat/trans/a2065d_doorbell --iface eth1'
-```
-
-### Test (lance-test via serial)
-
-```bash
-cd tests
-python3 -m pytest test_lance.py -v -s
-# A2065_CORE=/media/fat/Minimig_20260609a.rbf A2065_DAEMON=/media/fat/trans/a2065d_doorbell
-# x100 stress: .venv/bin/python run_lance_100x.py 100
-```
-
 ---
 
 ## 10 · Stress Test & Production Readiness
@@ -420,7 +370,7 @@ A2065/
 │   ├── sim/   tb_autoconfig, tb_boardram, tb_regfile (all passing)
 │   └── constraints/  a2065.sdc
 ├── tests/   test_lance.py (pytest), run_lance_100x.py, mister_ssh.py, serial_long.py
-├── docs/    AMD_Am7990.pdf, DESIGN_INTERNAL_LOOPBACK.md, Roadshow.md, A2065_Project_Article.{html,md}
+├── docs/    AMD_Am7990.pdf, DESIGN_INTERNAL_LOOPBACK.md, Roadshow.md, ...
 └── Minimig-AGA_MiSTer/  submodule — upstream core, modified for A2065
     └── rtl/A2065/  a2065_regfile.v, a2065_ddram.v, a2065_ddr3_mailbox.v, avalon_arbiter.v
 ```
@@ -434,12 +384,4 @@ A2065/
 
 ---
 
-## Reference
-
-- Amiberry `src/a2065.cpp` by Toni Wilen (2009) — reference implementation
-- AMD Am7990 LANCE datasheet — bus timing specifications ([`docs/AMD_Am7990.pdf`](docs/AMD_Am7990.pdf), [`docs/am79c90.md`](docs/am79c90.md))
-- Commodore A2065 Hardware Reference — Zorro II card details
-- Zorro II specification — Amiga Hardware Reference Manual chapter 6
-- [`DESIGN.md`](DESIGN.md) · [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) — architecture and the 11-step plan
-
-*Port of Amiberry `a2065.cpp` (Toni Wilen, 2009).*
+*Port of Amiberry `a2065.cpp` (Toni Wilen, 2009). Generated 2026-06-09 from project code and documentation.*
