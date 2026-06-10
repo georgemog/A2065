@@ -115,9 +115,10 @@ directions:
   wrong MAC and the lease would fail.
 
 > ⚠️ **Non-standard kernel required.** The stock MiSTer Linux kernel ships no USB Ethernet drivers —
-> it has only the on-board NIC. This project runs a **locally-built MiSTer kernel (Linux 5.15.1) with
-> USB NIC driver support enabled** (CDC-ECM / ASIX / RTL8152 etc.), which is what enumerates the USB
-> adapter as `eth1`. The kernel image is included in the repo at [`kernel/zImage_dtb`](../kernel/zImage_dtb).
+> it has only the on-board NIC. This project runs a **locally-built MiSTer kernel (Linux 5.15.1) with the
+> USB NIC drivers compiled statically into the image** (CDC-ECM / ASIX / RTL8152 etc.), which is what
+> enumerates the USB adapter as `eth1`. The drivers are built in (not loadable modules), so the kernel is
+> self-contained — no rootfs `.ko` files needed. The image is included at [`kernel/zImage_dtb`](../kernel/zImage_dtb).
 > Without that kernel there is no wire-side interface for the daemon to bind its raw socket to, and the
 > whole network path is dead. The custom kernel is a hard prerequisite, not an optional convenience.
 
