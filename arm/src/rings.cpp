@@ -33,6 +33,7 @@ extern int *    registers_tdr_offset(void);
 extern int *    registers_rdr_offset(void);
 extern uint16_t registers_mode(void);
 extern int      registers_prom(void);
+extern uint64_t registers_ladrf(void);
 extern void     registers_get_fakemac(uint8_t *out);
 extern void     rethink(void);
 
@@ -231,7 +232,19 @@ void gotfunc(const uint8_t *databuf, int len)
 
     if (!(registers_mode() & MODE_LOOP)) {
         if (dstmac[0] & 0x01) {
-            if (memcmp(dstmac, BROADCAST_MAC, 6) != 0) {
+            /* Multicast (group bit set). Broadcast is always accepted.
+             * For other multicast the Am7990 hashes the destination address
+             * into the 64-bit logical address filter (LADRF): the top 6 bits
+             * of the (non-inverted) CRC-32 of the 6 address bytes select a bit;
+             * the frame is accepted only if that LADRF bit is set. With LADRF=0
+             * (no groups joined) all multicast is rejected — matching hardware,
+             * and stopping the daemon from flooding the RX ring with IPv6
+             * ND/MLD traffic the Amiga never asked for. PROM mode bypasses. */
+            if (!registers_prom() &&
+                memcmp(dstmac, BROADCAST_MAC, 6) != 0) {
+                uint32_t hash = (~crc32_compute(dstmac, 6)) >> 26;
+                if (!(registers_ladrf() & (1ULL << hash)))
+                    return;
             }
         } else {
             if (!registers_prom() &&

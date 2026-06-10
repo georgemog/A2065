@@ -593,7 +593,9 @@ Also yc_out chroma LUT multicycle constraints (lines 29-34) to fix timing degrad
 - **lance-test diags (build 20260606a + old bridge):** Buffer PASS, Config PASS, Interrupt PASS, Collision FAIL — known-good baseline
 - **lance-test diags (build 20260608c + doorbell):** Buffer FAIL (other tests not reached). Doorbell path proven working — ARM daemon received CSR0=STOP writes. Serial command must use `\r` not `\r\n` (test framework fix applied to `serial_long.py`).
 - **Thread safety:** RX thread (`gotfunc`) and main thread both access CSR0 and boardram. No mutex protection. Currently benign because `registers_csr0()` reads a volatile uint16_t (atomic on ARM), and boardram DDR3 flat access is single-threaded.
-- **AddNetInterface A2065:** Not yet tested with doorbell daemon.
+- **AddNetInterface A2065:** Works with doorbell daemon — both Roadshow and MiamiDX stacks DHCP a lease (192.168.1.190) and ping cleanly on a real network. lance-test-independent: full TCP/IP. Verified via `logs/{roadshow,miami}/a2065d.log` + pcaps (DHCP DISCOVER/OFFER/REQUEST/ACK, ping 18/18 + 43/43 echo req↔reply, zero error keywords). HTTP `GET /100MB.bin` through the Amiga's own stack: 109MB @ ~520KB/s, 0 lost segments, 0 RST, 0.014% retransmit (`logs/test-fix.pcap`). The 68000 is the throughput bottleneck (zero-window flow control), not the A2065.
+- **Issue B FIXED — RX multicast filter (LADRF hash):** `rings.cpp` `gotfunc()` multicast branch was an empty stub → daemon delivered ALL multicast to the Amiga RX ring (55-64% of RX when idle = IPv6 ND/MLD flood the Amiga drops). Fix implements the Am7990 logical-address-filter hash: `hash = (~crc32_compute(dstmac,6)) >> 26` (top 6 bits of non-inverted CRC-32, WinUAE/LANCE convention), accept only if `registers_ladrf() & (1ULL<<hash)`. Broadcast always accepted, PROM mode bypasses. With LADRF=0 (no group joined) all multicast rejected — matching real hardware. Added `extern uint64_t registers_ladrf(void)` to rings.cpp. Hardware-verified: 126MB download clean, no regression, daemon stable. Spares the 68000 a constant ~7 ND-frames/sec background load; dominant win when idle.
+- **Issue A OPEN — station MAC low bytes zero (real, not just cosmetic):** on-wire src MAC = `00:80:10:00:00:00`. Daemon writes MBX_MAC fakemac `00:80:10:00:04:2B` at startup but `chip_init()` overwrites fakemac from the init-block PADR (`registers.cpp:141-146`), which the Amiga programmed from the card PROM (cpu_wrapper.v hardcoded serial bytes). So `04:2B` never reaches the wire. Harmless with one card; **MAC-collision risk** with two A2065 on a LAN. Fix = patch init-block PADR low half or the PROM serial bytes. Related to the cpu_wrapper.v hardcoded-MAC note above and the MAC-display cosmetic issue #3.
 
 ## MiSTer Operational Notes
 
@@ -649,6 +651,7 @@ Also yc_out chroma LUT multicycle constraints (lines 29-34) to fix timing degrad
 
 1. **Complete the full lance-test x100** — two partial runs hit 70/70 ALL PASS but neither reached 100 (harness reaped the background task). Run detached and let it finish for a clean 100-run report.
 2. **MAC display byte ordering** (cosmetic) — lance-test shows `00:FFFFFF80:10:00:00:00` (sign-extension of the 0x80 byte in the PROM-display path). Doesn't affect operation; ethernet works.
-3. **Test AddNetInterface A2065** — real AmigaOS TCP/IP stack (Roadshow/AmiTCP) over the doorbell daemon.
-4. **Connect cpu_berr_n** — watchdog timeout should generate BERR, not return $0000.
-5. **Packet throughput** — measure/optimize; RDP-write back-pressure adds one daemon round-trip per register write (fine for control, may bound TX rate).
+3. ~~**Test AddNetInterface A2065**~~ — DONE. Roadshow + MiamiDX both DHCP + ping + HTTP download clean on a real network (see Known Issues / Notes).
+4. **Issue A — station MAC low bytes zero** — patch init-block PADR low half or cpu_wrapper.v PROM serial bytes so the on-wire MAC is unique (`…04:2B`, not `…00:00`). MAC-collision risk with two cards. See Known Issues / Notes.
+5. **Connect cpu_berr_n** — watchdog timeout should generate BERR, not return $0000.
+6. **Packet throughput** — measure/optimize; RDP-write back-pressure adds one daemon round-trip per register write (fine for control, may bound TX rate). Note: 68000 is the receive bottleneck (zero-window flow control during 520KB/s download).
