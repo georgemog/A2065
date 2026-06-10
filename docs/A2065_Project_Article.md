@@ -28,7 +28,7 @@ through stock AmigaOS A2065 drivers. It is a port of Amiberry's `a2065.cpp`
 
 Work splits across two compute domains living on one DE10-Nano SoC plus a USB NIC:
 
-- **FPGA fabric (Cyclone V)** — presents the card to the Amiga 68000. Zorro II
+- **FPGA fabric (Cyclone V)** — presents the card to the Amiga 68020. Zorro II
   autoconfig, flat DDR3 boardram window, CSR regfile + doorbell (zero-latency reads,
   async writes to ARM), INT2 interrupt generation. Clock domains `clk_sys` (68k) and
   `clk_audio` (mailbox/DDR3), bridged by CDC synchronizers.
@@ -47,7 +47,7 @@ Work splits across two compute domains living on one DE10-Nano SoC plus a USB NI
 ┌─────────────────────────────────────────────────────────────────────┐
 │  AmigaOS  ·  stock A2065 SANA-II driver  ·  TCP/IP stack (Roadshow)  │  software
 ├─────────────────────────────────────────────────────────────────────┤
-│  Motorola 68000  ·  Zorro II bus cycles to card window $EAxxxx       │  emulated CPU
+│  Motorola 68020  ·  Zorro II bus cycles to card window $EAxxxx       │  emulated CPU
 ╞═════════════════════════════════════════════════════════════════════╡  ── FPGA (Cyclone V) ──
 │  a2065_autoconfig   ZorroII ROM → base address latched               │  clk_sys
 │  a2065_regfile      CSR reads (combinational from shadow) + doorbell  │
@@ -135,20 +135,20 @@ register writes ring a doorbell; boardram rides a flat DDR3 window; interrupts f
 
 ```
 Register read (zero-latency):
-  68000 → a2065_regfile (combinational from csr_shadow) → data bus OR-tie
+  68020 → a2065_regfile (combinational from csr_shadow) → data bus OR-tie
   ARM updates shadow → DDR3 CSR slot → mailbox FSM poll → regfile
 
 Register write (doorbell):
-  68000 → a2065_regfile → cmd_pending/rap/data (level) → mailbox FSM (CDC 2-stage)
+  68020 → a2065_regfile → cmd_pending/rap/data (level) → mailbox FSM (CDC 2-stage)
         → DDR3 CMD slot → ARM polls → chip_wput() → push_csr_shadow() → DDR3 CSR slot
 
 Boardram:
-  68000 → a2065_ddram → bram_req_valid (level) → mailbox FSM (CDC 2-stage)
+  68020 → a2065_ddram → bram_req_valid (level) → mailbox FSM (CDC 2-stage)
         → DDR3 read/write → ddram (CDC 2-stage) → cpu_data_out
 
 Interrupt:
   ARM daemon → push_csr_shadow + update_int_state → DDR3 INT slot
-        → mailbox FSM poll → a2065_int2 → CDC 2-stage → Paula int2 → 68000 level 2
+        → mailbox FSM poll → a2065_int2 → CDC 2-stage → Paula int2 → 68020 level 2
 ```
 
 ### DDR3 Layout (offsets from `DDR3_FLAT_BASE = 0x1FF00000`)
@@ -350,7 +350,7 @@ Distilled from the build journal — the non-obvious traps that cost the most ti
 | Issue A — station MAC low bytes `…00:00` (collision risk with 2 cards) | Cosmetic (single card) | 🔲 Open |
 | MAC display byte ordering — shows `00:FFFFFF80:10:...` (sign-extension) | Cosmetic | 🔲 Open (issue #3) |
 | Connect `cpu_berr_n` — watchdog timeout should raise BERR, not return $0000 | Robustness | 🔲 TODO (low) |
-| Packet throughput — bounded by the 68000, not the card | Performance | ✅ Characterized |
+| Packet throughput — bounded by the 68020, not the card | Performance | ✅ Characterized |
 
 Two non-blocking issues remain: **Issue A** (on-wire MAC low bytes `00:00`) — cosmetic for a single card, a
 MAC-collision risk only with two A2065 on one LAN; and the MAC *display* sign-extension. **Issue B** (multicast
