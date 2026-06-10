@@ -382,9 +382,9 @@ python3 -m pytest test_lance.py -v -s
    0 lost segments, 0 RST, 0.014% retransmit. Clean.
 4. **DHCP + ping, both stacks** — Roadshow *and* MiamiDX both lease `192.168.1.190`; ping 18/18 + 43/43, zero loss.
 
-> **Throughput ceiling is the 68000, not the A2065.** ~520 KB/s with zero-window flow control means the 7 MHz CPU
-> simply can't drain the RX ring any faster — the card and DDR3 bridge keep up fine. The bottleneck is the emulated
-> Amiga itself, not the emulated card.
+> **Throughput ceiling is the 68020, not the A2065.** ~520 KB/s with zero-window flow control means the 68020
+> (50 MHz) simply can't drain the RX ring any faster — the card and DDR3 bridge keep up fine. The bottleneck is the
+> emulated Amiga itself, not the emulated card.
 
 | ~75 min | ~505 KB/s | 11772 KB | 0.014% |
 |:---:|:---:|:---:|:---:|
