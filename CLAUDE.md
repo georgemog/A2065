@@ -302,6 +302,21 @@ Interrupt path:
 - **MiSTer verified:** share:a2065_memtest **10/10 PASS** (byte access + odd/even now PASS). lance-test still 3/4 (Collision FAIL — daemon-side, separate).
 - **Commit:** submodule `ff20394`.
 
+#### Build 20260613a (MERGE onto upstream Release 20260603 — lance-test 5/5)
+- **Result:** SUCCESS, 0 errors, 83 warnings. RBF `Minimig_20260613a.rbf` (3,488,776 bytes).
+- **What:** merged doorbell `ff20394` onto upstream `MiSTer-devel @ eb7a26e` (Release 20260603). Submodule branch `a2065-doorbell-rebased`, merge commit **`eb894c8`** (2-parent: `eb7a26e` + `ff20394`), pushed to `fork`. Plan: `docs/A2065_Minimig_Merge_Plan.md`.
+- **Reconciliation (a raw text-merge auto-merges clean but does NOT compile — R1):**
+  - `Minimig.sv`: kept upstream `` `include "sys/emu_ports.vh" `` + appended A2065 emu ports comma-first (upstream's "Update sys." deleted the explicit emu port block the fork extended).
+  - `sys/sysmem.sv`: reverted to upstream — fork's h2f (HPS→FPGA AXI) master was vestigial (nothing consumed it; doorbell uses f2sdram2).
+  - `sys/sys_top.v`: deleted dangling `h2f_*` sysmem ports/wires; kept arbiter+mailbox+emu A2065 wiring inside `// ===== A2065 BEGIN/END =====` guards.
+  - `files.qip`: pruned 3 dead modules (a2065_axi_slave, a2065_ddr3_test, ddr_arbiter) → 4 live.
+  - `Minimig.sdc`: removed phantom `a2065_boardram_inst` multicycle (doorbell has no such inst — boardram is DDR3 in `a2065_ddram_inst`); annotated yc_out for re-validation.
+  - Core RTL (minimig.v, cpu_wrapper.v, gary.v) + all 11 `rtl/A2065/*.v` byte-identical to `ff20394`.
+- **Timing:** setup slack **+0.377ns**, hold **+0.246ns** — positive on all corners (better than several earlier doorbell builds at +0.003–0.288).
+- **Build host:** Quartus server `192.168.1.65`, dir `~/Development/Minimig-A2065-rebased` (fresh dir, rsync of resolved tree). Elapsed 26:17.
+- **MiSTer verified:** lance-test **5/5 PASS** ("Controller PASSED diagnostics" — Buffer/Config/Interrupt/Collision/Loopback). AddNetInterface a2065 → DHCP 192.168.1.190, ping LAN 7/7 + internet (8.8.8.8) 13/13, 0% loss. Full parity with fork baseline 20260609a.
+- **GOTCHA:** pytest `test_lance.py` autocapture reported empty serial output — a `serial_long.py` timing artifact, NOT a core fault. Manual `share:lance-test diags` runs clean.
+
 ### Old Bridge Builds (branch main)
 
 ### Build 20260507 (register DDR3 round-trip verified)
