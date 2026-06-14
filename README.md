@@ -4,7 +4,9 @@ Full hardware emulation of the Commodore A2065 Zorro II Ethernet card on the
 Minimig FPGA core (DE10-Nano / Cyclone V). Runs stock AmigaOS A2065 drivers —
 no custom Amiga-side software.
 
-> **Status:** Steps 0–11 Complete · Branch `simplification/flat-ddr3-doorbell` · Updated 2026-06-09
+> **Status:** Steps 0–11 Complete · Branch `simplification/flat-ddr3-doorbell` · Updated 2026-06-13
+>
+> **Latest build `Minimig_20260613a.rbf` — merged onto upstream Minimig Release 20260603 (`eb7a26e`) and hardware-tested: lance-test 5/5 PASS + DHCP + ping.** See [`releases/`](releases/) and [`docs/A2065_Minimig_Merge_Plan.md`](docs/A2065_Minimig_Merge_Plan.md) §11.
 
 A formatted HTML version of this overview is at [`docs/A2065_Project_Article.html`](docs/A2065_Project_Article.html);
 the Markdown source is [`docs/A2065_Project_Article.md`](docs/A2065_Project_Article.md).
@@ -188,6 +190,10 @@ Eleven-step plan. All steps complete through stress test and polish.
 > **Headline result:** lance-test diagnostics **5/5 PASS** — "Controller PASSED diagnostics"
 > (build 20260609a + byteswap daemon). Buffer, Config, Interrupt, Collision and Loopback all pass.
 > Surpasses the old-bridge baseline of 3/4.
+>
+> **Re-verified on the upstream merge:** `Minimig_20260613a.rbf` (doorbell merged onto Minimig
+> Release 20260603) is tested on hardware — lance-test **5/5 PASS**, DHCP lease + LAN/internet ping,
+> Quartus-clean (setup +0.377 ns / hold +0.246 ns). Full parity with 20260609a.
 
 | 5/5 | 100/100 | 10/10 | DHCP |
 |:---:|:---:|:---:|:---:|
@@ -204,8 +210,8 @@ Eleven-step plan. All steps complete through stress test and polish.
   Report `tests/lance_logs/results_100x_20260609_143735.md`.
 - **AddNetInterface A2065:** a stock AmigaOS TCP/IP stack obtained DHCP lease `192.168.1.190` with route
   and DNS, then pinged the network.
-- **Daemon footprint:** 2–7% CPU under load, ~2% / 11.7 MB resident, no leak. Adaptive poll backoff dropped
-  idle CPU from ~100% (busy-spin) to ~2–9%; a `--debug` flag gates verbose logging.
+- **Daemon footprint:** 2–7% CPU under load, ~ 2% / 11.7 MB resident, no leak. Adaptive poll backoff dropped
+  idle CPU from ~ 100% (busy-spin) to ~ 2–9%; a `--debug` flag gates verbose logging.
 
 ---
 
@@ -239,7 +245,7 @@ init block byteswapped → wrong TDRA/RDRA → `do_transmit` found no TX descrip
 every byte index with 1 (`boardram[(off ^ 1) & RAM_MASK]`). After the fix TDRA resolves and all 10 collision
 sends run.
 
-> ⚠️ **Gotcha that cost ~5 build cycles:** a stale duplicate `src/boardram_access.h` existed only on the build
+> ⚠️ **Gotcha that cost ~ 5 build cycles:** a stale duplicate `src/boardram_access.h` existed only on the build
 > host. Because the `.cpp` files live in `src/` and include the header by name, the compiler resolved the
 > same-dir copy *before* `-I include`, silently ignoring edits to the real header. Verify the active header with
 > `g++ -I include -E src/registers.cpp | grep get_ram_byte`.
@@ -309,7 +315,7 @@ Distilled from the build journal — the non-obvious traps that cost the most ti
 
 | Role | Host | Notes |
 |---|---|---|
-| Quartus FPGA build | `nshearman@192.168.1.65` · Quartus 17.0 | ~25 min wall. Output `Minimig.rbf`. Good build: `Minimig_20260609a.rbf` |
+| Quartus FPGA build | `nshearman@192.168.1.65` · Quartus 17.0 | ~ 25 min wall. Output `Minimig.rbf`. Good builds: `Minimig_20260613a.rbf` (latest, upstream-merged, tested) · `Minimig_20260609a.rbf` |
 | ARM cross-compile | `root@192.168.1.97` · `arm-none-linux-gnueabihf-g++` | `make doorbell` → `a2065d_doorbell` |
 | m68k cross-compile | `/opt/amiga/bin/m68k-amigaos-gcc` | Cross-built Amiga binaries run silently/empty here — only the pre-built `share:lance-test` and shell commands work |
 | MiSTer target | `root@192.168.1.29` | Deploy to `/media/fat/trans/`. Serial `/dev/ttyS1` @ 115200. Core reload via `load_core` to `/dev/MiSTer_cmd` |
@@ -374,19 +380,19 @@ python3 -m pytest test_lance.py -v -s
 
 ### Evidence (this session)
 
-1. **Repeated 100 MB downloads** — Amiga `wget` command over the A2065, 08:36→09:51, ~75 min continuous, ~15 back-to-back
-   100 MB pulls at a steady ~505 KB/s. Every one completed `[104857600/104857600]`. Zero variance, zero corruption.
-2. **Daemon health under load** — `top`: steady ~11–12% CPU, RSS flat at 11772 KB start→end (no leak), PID stable,
+1. **Repeated 100 MB downloads** — Amiga `wget` command over the A2065, 08:36→09:51, ~ 75 min continuous, ~ 15 back-to-back
+   100 MB pulls at a steady ~ 505 KB/s. Every one completed `[104857600/104857600]`. Zero variance, zero corruption.
+2. **Daemon health under load** — `top`: steady ~ 11–12% CPU, RSS flat at 11772 KB start→end (no leak), PID stable,
    no crash or restart across the whole window.
 3. **Amiga-native TCP transfer** — `test-fix.pcap`: the Amiga's own stack doing an HTTP GET: 109 MB @ 520 KB/s,
    0 lost segments, 0 RST, 0.014% retransmit. Clean.
 4. **DHCP + ping, both stacks** — Roadshow *and* MiamiDX both lease `192.168.1.190`; ping 18/18 + 43/43, zero loss.
 
-> **Throughput ceiling is the 68020, not the A2065.** ~520 KB/s with zero-window flow control means the 68020
+> **Throughput ceiling is the 68020, not the A2065.** ~ 520 KB/s with zero-window flow control means the 68020
 > (50 MHz) simply can't drain the RX ring any faster — the card and DDR3 bridge keep up fine. The bottleneck is the
 > emulated Amiga itself, not the emulated card.
 
-| ~75 min | ~505 KB/s | 11772 KB | 0.014% |
+| ~ 75 min | ~ 505 KB/s | 11772 KB | 0.014% |
 |:---:|:---:|:---:|:---:|
 | continuous saturated transfer | steady, zero variance | RSS flat — no leak | retransmit, 0 RST |
 
