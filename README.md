@@ -13,6 +13,40 @@ the Markdown source is [`docs/A2065_Project_Article.md`](docs/A2065_Project_Arti
 
 ---
 
+## 00 · Updates
+
+### 2026-06-13 — `Minimig_20260613a.rbf` (upstream-merged release)
+
+**What it is:** the A2065 doorbell core rebased onto the latest upstream Minimig —
+**`MiSTer-devel/Minimig-AGA_MiSTer` Release 20260603 (`eb7a26e`)**. Previous good builds
+(e.g. `20260609a`) were based on the older Release 20260220; this one brings the A2065 work
+up to current upstream so it tracks the mainline core.
+
+**What changed vs the previous good build (`20260609a`):**
+
+- **New baseline.** Merged onto upstream `eb7a26e` instead of `3ab91cd`. Picks up upstream's
+  "Update sys." framework refactor (the `emu` port list moved into `sys/emu_ports.vh`, plus
+  audio/scaler/HDMI plumbing). No A2065 logic changed — the networking RTL is identical to
+  `20260609a`; only the surrounding core is newer.
+- **Cleaner integration.** The vestigial HPS→FPGA AXI (`h2f`) path was dropped (`sys/sysmem.sv`
+  reverted to upstream, byte-identical); dead/unused RTL moved to `rtl/A2065/legacy/`;
+  the A2065 block in `sys/sys_top.v` is now guard-commented for easy re-apply after future
+  upstream `Update sys.` drops.
+- **Same behaviour.** The doorbell signal paths, DDR3 mailbox, and daemon protocol are unchanged.
+
+**Verification (hardware, DE10-Nano):**
+
+- lance-test diagnostics **5/5 PASS** — Buffer / Config / Interrupt / Collision / Loopback.
+- `AddNetInterface a2065` → DHCP lease `192.168.1.190`, ping LAN 7/7 + internet (`8.8.8.8`) 13/13, 0% loss.
+- Quartus 17.0 clean: 0 errors, setup slack **+0.377 ns**, hold **+0.246 ns**.
+- Full parity with the `20260609a` baseline.
+
+Merge details and the full risk register are in
+[`docs/A2065_Minimig_Merge_Plan.md`](docs/A2065_Minimig_Merge_Plan.md) §11.
+The RBF ships in [`releases/Minimig_20260613a.rbf`](releases/Minimig_20260613a.rbf).
+
+---
+
 ## 01 · What It Is
 
 The A2065 was Commodore's Zorro II Ethernet card built around the AMD Am7990 LANCE
