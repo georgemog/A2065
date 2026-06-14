@@ -15,6 +15,26 @@ the Markdown source is [`docs/A2065_Project_Article.md`](docs/A2065_Project_Arti
 
 ## 00 · Updates
 
+### 2026-06-14 — asix-only MiSTer kernel (`kernel/zImage_dtb`)
+
+**What it is:** the locally-built MiSTer Linux 5.15.1 kernel rebuilt with **only** the ASIX
+`AX8817x` USB Ethernet driver — all other USB NIC drivers (gigabit `AX88179_178A`, CDC-ECM,
+RTL8152, DM9601, SMSC95xx, …) disabled. The asix driver is built in (`=y`), not a module.
+
+**Why:** the USB adapter in use is an ASIX `AX88772B`. Trimming the rest removes dead drivers
+and avoids the module-autoload trap — MiSTer's running `uname` (`5.15.1+`) doesn't match its
+`/lib/modules/5.15.1-MiSTer` dir, so a built-in driver is the only reliable option. WLAN /
+USB-wifi drivers are left untouched.
+
+**Verification (hardware, DE10-Nano):** booted the new `zImage_dtb`, then —
+lance-test diagnostics **5/5 PASS**, `AddNetInterface a2065` → DHCP lease `192.168.1.190`,
+ping LAN 18/18 + internet (`8.8.8.8`) 9/9, 0% loss. A2065 networking unaffected by the kernel trim.
+
+Kernel-source change (build host, `Linux-Kernel_MiSTer`): one targeted `MiSTer_defconfig`
+edit (`USB_NET_DRIVERS=y` / `USB_USBNET=y` / `USB_NET_AX8817X=y`, all other USB-eth off).
+
+---
+
 ### 2026-06-13 — `Minimig_20260613a.rbf` (upstream-merged release)
 
 **What it is:** the A2065 doorbell core rebased onto the latest upstream Minimig —
@@ -155,9 +175,11 @@ directions:
 
 > ⚠️ **Non-standard kernel required.** The stock MiSTer Linux kernel ships no USB Ethernet drivers —
 > it has only the on-board NIC. This project runs a **locally-built MiSTer kernel (Linux 5.15.1) with the
-> USB NIC drivers compiled statically into the image** (CDC-ECM / ASIX / RTL8152 etc.), which is what
-> enumerates the USB adapter as `eth1`. The drivers are built in (not loadable modules), so the kernel is
-> self-contained — no rootfs `.ko` files needed. The image is included at [`kernel/zImage_dtb`](kernel/zImage_dtb).
+> ASIX `AX8817x` USB NIC driver compiled statically into the image** (asix-only — all other USB Ethernet
+> drivers disabled), which is what enumerates the USB adapter as `eth1`. The driver is built in (not a
+> loadable module), so the kernel is self-contained — no rootfs `.ko` files needed and no module-autoload
+> dependency (MiSTer's `uname` `5.15.1+` mismatches its `/lib/modules/5.15.1-MiSTer` dir).
+> The image is included at [`kernel/zImage_dtb`](kernel/zImage_dtb).
 > Without that kernel there is no wire-side interface for the daemon to bind its raw socket to, and the
 > whole network path is dead. The custom kernel is a hard prerequisite, not an optional convenience.
 
