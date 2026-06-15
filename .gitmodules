@@ -2,3 +2,7 @@
 	path = Minimig-AGA_MiSTer
 	url = https://github.com/georgemog/Minimig-AGA_MiSTer
 	branch = a2065-doorbell
+[submodule "Main_MiSTer"]
+	path = Main_MiSTer
+	url = https://github.com/georgemog/Main_MiSTer.git
+	branch = a2065-osd-ethernet
