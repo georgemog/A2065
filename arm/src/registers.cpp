@@ -111,6 +111,7 @@ static void chip_init_mask(void)
 }
 
 extern void rings_reset_loopback_count(void);
+extern void mac_set_fakemac(const uint8_t *fake);
 static void chip_init(void)
 {
     rings_reset_loopback_count();
@@ -144,6 +145,11 @@ static void chip_init(void)
     fakemac[3] = get_ram_byte(off + 4);
     fakemac[4] = get_ram_byte(off + 7);
     fakemac[5] = get_ram_byte(off + 6);
+
+    /* Tell the munge unit the address the Amiga actually uses on the wire, so
+     * mungepacket() can swap it for the unique NIC-derived realmac. Otherwise
+     * the wire src stays the Amiga's station MAC (00:80:10:00:00:00). */
+    mac_set_fakemac(fakemac);
 
     chip_init_mask();
     DBG("[a2065] chip_init: mode=%04X rdr_rlen=%u tdr_tlen=%u "

@@ -14,6 +14,7 @@
 #include <net/if.h>
 #include <sys/ioctl.h>
 #include <arpa/inet.h>
+#include <time.h>
 
 extern void registers_reset(void);
 extern void registers_lock_init(void);
@@ -35,6 +36,7 @@ extern int  ethernet_open(const char *iface, int promiscuous);
 extern void ethernet_close(void);
 extern int  ethernet_recv(uint8_t *buf, int maxlen);
 extern void ethernet_get_mac(uint8_t *mac_out);
+extern int  ethernet_read_iface_mac(const char *iface, uint8_t *out);
 
 static volatile sig_atomic_t running = 1;
 static volatile uint8_t *map = NULL;
@@ -122,11 +124,51 @@ static void write_mbx_mac(const uint8_t *fakemac)
             (unsigned long long)val);
 }
 
-static void daemon_set_default_mac(void)
+static int mac_low_is_zero(const uint8_t *m) { return (m[3] | m[4] | m[5]) == 0; }
+
+/* Last-resort unique low half when no NIC MAC is available. Seeds from the
+ * MiSTer hostname plus pid/time so two daemons never collide and never emit
+ * an all-zero MAC. Hostname keeps it stable across a session on one host. */
+static void derive_unique_low(uint8_t *m)
+{
+    char host[64] = {0};
+    gethostname(host, sizeof host - 1);
+    uint32_t h = 2166136261u;                       /* FNV-1a */
+    for (const char *p = host; *p; ++p)
+        h = (h ^ (uint8_t)*p) * 16777619u;
+    h ^= (uint32_t)getpid();
+    h ^= (uint32_t)time(NULL);
+    m[3] = (h >> 16) & 0xff;
+    m[4] = (h >> 8)  & 0xff;
+    m[5] =  h        & 0xff;
+    if (mac_low_is_zero(m)) m[5] = 0x01;             /* never all-zero */
+}
+
+/* Resolve the wire-side MAC low bytes robustly so two cards on one LAN never
+ * collide. Order: selected iface MAC → onboard eth0 (unique per board, stable)
+ * → hostname/pid/time hash. The on-wire src is realmac (fakemac->realmac munge
+ * in mungepacket), so a unique non-zero low half here is the actual fix for the
+ * observed 00:80:10:00:00:00. The OUI is always forced to Commodore 00:80:10. */
+static void daemon_set_default_mac(const char *iface)
 {
     uint8_t realmac[6] = {0}, fakemac[6];
+    const char *src = iface;
 
     ethernet_get_mac(realmac);
+
+    if (mac_low_is_zero(realmac)) {
+        /* Selected iface had no usable MAC (e.g. USB NIC late/down). Try the
+         * onboard eth0 — present and unique per DE10-Nano even when eth1 isn't. */
+        uint8_t fb[6];
+        if (ethernet_read_iface_mac("eth0", fb)) {
+            memcpy(realmac, fb, 6);
+            src = "eth0";
+        } else {
+            derive_unique_low(realmac);
+            src = "hostname-hash";
+            LOG("[doorbell] no NIC MAC; derived unique low bytes (fallback)\n");
+        }
+    }
 
     fakemac[0] = COMMODORE_OUI0;
     fakemac[1] = COMMODORE_OUI1;
@@ -142,9 +184,9 @@ static void daemon_set_default_mac(void)
     mac_set_addresses(fakemac, realmac);
     registers_set_fakemac(fakemac);
 
-    DBG("[doorbell] fakemac=%02X:%02X:%02X:%02X:%02X:%02X\n",
-            fakemac[0], fakemac[1], fakemac[2],
-            fakemac[3], fakemac[4], fakemac[5]);
+    LOG("[doorbell] MAC low bytes from %s -> wire %02X:%02X:%02X:%02X:%02X:%02X\n",
+            src, realmac[0], realmac[1], realmac[2],
+            realmac[3], realmac[4], realmac[5]);
 }
 
 static int test_boardram(void)
@@ -247,7 +289,7 @@ int main(int argc, char *argv[])
         LOG("[a2065d doorbell] Failed to open %s, continuing without network\n", iface);
     }
 
-    daemon_set_default_mac();
+    daemon_set_default_mac(iface);
 
     {
         uint8_t fakemac[6];

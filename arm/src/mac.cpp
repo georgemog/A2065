@@ -24,6 +24,13 @@ void mac_set_addresses(const uint8_t *fake, const uint8_t *real)
     memcpy(realmac, real, 6);
 }
 
+/* Update only the fakemac (the Amiga-side address munge matches against),
+ * leaving realmac untouched. Called from chip_init once the LANCE init block
+ * reveals the station address the Amiga actually programmed (from autoconfig
+ * er_SerialNumber). Without this the startup fakemac never matches the real
+ * Amiga frames and the fakemac<->realmac swap is a no-op. */
+void mac_set_fakemac(const uint8_t *fake) { memcpy(fakemac, fake, 6); }
+
 void mac_get_fake(uint8_t *out) { memcpy(out, fakemac, 6); }
 void mac_get_real(uint8_t *out) { memcpy(out, realmac, 6); }
 

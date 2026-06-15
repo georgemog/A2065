@@ -215,9 +215,6 @@ void gotfunc(const uint8_t *databuf, int len)
     uint8_t tmp[MAX_PACKET_SIZE];
     uint8_t fakemac_buf[6];
 
-    const uint8_t *dstmac = databuf;
-    const uint8_t *srcmac = databuf + 6;
-
     if (!(registers_csr0() & CSR0_RXON)) {
         if (registers_mode() & MODE_LOOP)
             DBG("[a2065] RX LOOP skip: RXON off csr0=%04X\n", registers_csr0());
@@ -229,6 +226,19 @@ void gotfunc(const uint8_t *databuf, int len)
     if (registers_rdr_rdra() + (rdr_rlen - 1) * 8 > RAM_MASK) { DBG("[a2065] RX skip: rdr overflow\n"); return; }
 
     registers_get_fakemac(fakemac_buf);
+
+    /* Munge BEFORE filtering: on the wire we use the unique realmac, so an
+     * incoming reply is addressed to realmac. mungepacket() swaps realmac->
+     * fakemac (the Amiga's station MAC), after which every filter below can
+     * compare against fakemac as before. Filtering the raw frame would drop
+     * unicast replies (dst=realmac != fakemac). */
+    memcpy(tmp, databuf, len);
+    uint8_t *d = tmp;
+    if (!(registers_mode() & MODE_LOOP))
+        mungepacket(d, len);
+
+    const uint8_t *dstmac = d;
+    const uint8_t *srcmac = d + 6;
 
     if (!(registers_mode() & MODE_LOOP)) {
         if (dstmac[0] & 0x01) {
@@ -264,12 +274,6 @@ void gotfunc(const uint8_t *databuf, int len)
         if (memcmp(dstmac, BROADCAST_MAC, 6) == 0 &&
             memcmp(srcmac, fakemac_buf, 6) == 0) return;
     }
-
-    memcpy(tmp, databuf, len);
-    uint8_t *d = tmp;
-
-    if (!(registers_mode() & MODE_LOOP))
-        mungepacket(d, len);
 
     uint32_t crc = crc32_compute(d, len);
     d[len++] = (uint8_t)(crc >> 24);

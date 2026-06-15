@@ -4,7 +4,7 @@ Full hardware emulation of the Commodore A2065 Zorro II Ethernet card on the
 Minimig FPGA core (DE10-Nano / Cyclone V). Runs stock AmigaOS A2065 drivers —
 no custom Amiga-side software.
 
-> **Status:** Steps 0–11 Complete · Branch `simplification/flat-ddr3-doorbell` · Updated 2026-06-13
+> **Status:** Steps 0–11 Complete · Branch `simplification/flat-ddr3-doorbell` · Updated 2026-06-15
 >
 > **Latest build `Minimig_20260613a.rbf` — merged onto upstream Minimig Release 20260603 (`eb7a26e`) and hardware-tested: lance-test 5/5 PASS + DHCP + ping.** See [`releases/`](releases/) and [`docs/A2065_Minimig_Merge_Plan.md`](docs/A2065_Minimig_Merge_Plan.md) §11.
 
@@ -14,6 +14,46 @@ the Markdown source is [`docs/A2065_Project_Article.md`](docs/A2065_Project_Arti
 ---
 
 ## 00 · Updates
+
+### 2026-06-15 — Issue A fixed: unique on-wire MAC + AmiTCP 3.3 verified
+
+**What it is:** the A2065 now emits a **unique, NIC-derived station MAC on the wire**
+(`00:80:10:XX:YY:ZZ`, low bytes from the daemon's Ethernet adapter) instead of the
+previous `00:80:10:00:00:00`. This removes the MAC-collision risk when two A2065 cards
+run on the same LAN. Daemon-only fix — no FPGA rebuild.
+
+**Root cause.** The Amiga reads its station address from autoconfig `er_SerialNumber`
+(FPGA-side), which is `00:00:00`. The daemon's MAC-translation unit (`mac.cpp`) is meant
+to rewrite the Amiga's `fakemac` to a unique `realmac` on every frame — but its `fakemac`
+copy was set once at startup from the NIC and **never matched the address the Amiga
+actually emitted** (`00:00:00`), so the swap silently did nothing and the wire carried
+`00:00:00`. A second copy of `fakemac` (in `registers.cpp`) *was* updated from the LANCE
+init block, but the munge unit never saw it.
+
+**The fix (three parts):**
+- `registers.cpp` `chip_init()` now calls `mac_set_fakemac()` to push the Amiga's *actual*
+  station address (from the init-block PADR) into the munge unit, so `mungepacket()` finally
+  matches outgoing frames and swaps `fakemac → realmac`.
+- `rings.cpp` `gotfunc()` now munges the **RX frame before filtering**. Replies arrive
+  addressed to the unique `realmac`; filtering the raw frame against `fakemac` would have
+  dropped every unicast reply. Munge-first puts the frame back in the Amiga's address space
+  before the accept checks run.
+- `main_doorbell.cpp` hardens `realmac` derivation: selected iface → onboard `eth0`
+  (unique/stable per DE10-Nano) → hostname/pid/time hash, guaranteeing a non-zero unique
+  low half even if the USB NIC is late or down at daemon start (the original trigger for the
+  observed `…00:00`).
+
+**Verification (hardware, DE10-Nano, `test.pcap`):** wire src MAC is now
+`00:80:10:00:04:2b` (from eth1 `68:68:68:00:04:2b`); **zero** frames remain with
+`…00:00:00`. Full bidirectional flow on the unique MAC — DHCP Request, gratuitous ARP
+("`192.168.1.81 is-at 00:80:10:00:04:2b`"), and ICMP echo request/reply (replies return to
+`…04:2b`, confirming the RX munge-before-filter path).
+
+**AmiTCP 3.3 on AmigaOS 3.1 — verified.** In addition to Roadshow and MiamiDX, the A2065
+now drives a third TCP/IP stack: **AmiTCP 3.3 under AmigaOS 3.1** — DHCP lease + ping over
+the live LAN, working end-to-end.
+
+---
 
 ### 2026-06-14 — asix-only MiSTer kernel (`kernel/zImage_dtb`)
 
@@ -431,7 +471,8 @@ python3 -m pytest test_lance.py -v -s
 ## 10 · Stress Test & Production Readiness
 
 > **Verdict: stress passed — the A2065 doorbell is production-solid under sustained real-world load.**
-> Networking is fully functional on **both AmigaOS TCP/IP stacks — Roadshow and MiamiDX**. Stable over hours of
+> Networking is fully functional on **three AmigaOS TCP/IP stacks — Roadshow, MiamiDX, and AmiTCP 3.3
+> (AmigaOS 3.1)**. Stable over hours of
 > saturated transfer with no daemon fault, no errors, no drops, no stalls. Steps 0–11 complete.
 
 ### Evidence (this session)
@@ -459,14 +500,13 @@ python3 -m pytest test_lance.py -v -s
 | Both TCP/IP stacks (Roadshow + MiamiDX) — DHCP + ping + saturated transfer | Integration | ✅ Done — both work |
 | Clean unattended full x100 run (detached, reach 100) | Validation | ✅ Done — 100/100 |
 | Issue B — RX multicast flood (LADRF hash filter) | Correctness | ✅ Fixed + verified |
-| Issue A — station MAC low bytes `…00:00` (collision risk with 2 cards) | Cosmetic (single card) | 🔲 Open |
+| Issue A — station MAC low bytes `…00:00` (collision risk with 2 cards) | Correctness | ✅ Fixed + verified — unique NIC-derived wire MAC |
 | MAC display byte ordering — shows `00:FFFFFF80:10:...` (sign-extension) | Cosmetic | 🔲 Open (issue #3) |
 | Connect `cpu_berr_n` — watchdog timeout should raise BERR, not return $0000 | Robustness | 🔲 TODO (low) |
 | Packet throughput — bounded by the 68020, not the card | Performance | ✅ Characterized |
 
-Two non-blocking issues remain: **Issue A** (on-wire MAC low bytes `00:00`) — cosmetic for a single card, a
-MAC-collision risk only with two A2065 on one LAN; and the MAC *display* sign-extension. **Issue B** (multicast
-flood) was fixed and verified this session.
+One non-blocking issue remains: the MAC *display* sign-extension (cosmetic). **Issue A** (on-wire MAC low bytes
+`00:00`) and **Issue B** (multicast flood) were both fixed and verified.
 
 ---
 

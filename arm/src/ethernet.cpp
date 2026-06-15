@@ -45,8 +45,11 @@ int ethernet_open(const char *iface, int promiscuous)
     }
     int ifindex = ifr.ifr_ifindex;
 
+    memset(host_mac, 0, 6);
     if (ioctl(sock_fd, SIOCGIFHWADDR, &ifr) == 0)
         memcpy(host_mac, ifr.ifr_hwaddr.sa_data, 6);
+    else
+        perror("[a2065] SIOCGIFHWADDR");
 
     /* Bring the interface up. The A2065's wire side (eth1) is often admin-down
      * after boot; raw send/recv fail with "Network is down" until IFF_UP is set. */
@@ -112,6 +115,25 @@ void ethernet_get_mac(uint8_t *mac_out)
     memcpy(mac_out, host_mac, 6);
 }
 
+/* Read any interface's hardware MAC without disturbing the open socket.
+ * Returns 1 if a non-zero low half (bytes 3..5) was obtained, else 0. */
+int ethernet_read_iface_mac(const char *iface, uint8_t *out)
+{
+    memset(out, 0, 6);
+    int fd = socket(AF_PACKET, SOCK_DGRAM, htons(ETH_P_ALL));
+    if (fd < 0) return 0;
+    struct ifreq ifr;
+    memset(&ifr, 0, sizeof ifr);
+    strncpy(ifr.ifr_name, iface, IFNAMSIZ - 1);
+    int ok = 0;
+    if (ioctl(fd, SIOCGIFHWADDR, &ifr) == 0) {
+        memcpy(out, ifr.ifr_hwaddr.sa_data, 6);
+        ok = (out[3] | out[4] | out[5]) != 0;
+    }
+    close(fd);
+    return ok;
+}
+
 #else
 
 int ethernet_open(const char *iface, int promiscuous)
@@ -137,6 +159,13 @@ int ethernet_recv(uint8_t *buf, int maxlen)
 void ethernet_get_mac(uint8_t *mac_out)
 {
     memset(mac_out, 0, 6);
+}
+
+int ethernet_read_iface_mac(const char *iface, uint8_t *out)
+{
+    (void)iface;
+    memset(out, 0, 6);
+    return 0;
 }
 
 #endif
