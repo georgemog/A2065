@@ -625,6 +625,7 @@ Also yc_out chroma LUT multicycle constraints (lines 29-34) to fix timing degrad
 - **Cross-compiled Amiga binaries don't work:** Neither GCC `-noixemul` nor VBCC produce working AmigaOS executables on this Minimig setup. Programs silently exit or produce no output.
 - **Serial line ending:** Must use `\r` (not `\r\n`) for Amiga shell commands via serial. `\n` causes the second word of multi-word commands to be eaten.
 - **`minimig_netd` must be killed:** `/etc/init.d/S90minimig_netd` starts `minimig_netd` which conflicts with the A2065 daemon. Disable: `killall minimig_netd; mv /etc/init.d/S90minimig_netd /etc/init.d/S90minimig_netd.disabled`
+- **OSD ethernet menu (Main_MiSTer fork):** Minimig System (OSD) page now has an `Ethernet : OFF/eth0/eth1` option (default eth1) that starts/stops `a2065d_doorbell` and kills `minimig_netd` automatically — supersedes the manual daemon start above. Selection persisted in `/media/fat/config/a2065_iface.txt`; daemon launched from `/media/fat/linux/a2065d_doorbell`. Code: `Main_MiSTer/support/minimig/minimig_a2065.{h,cpp}`, `menu.cpp` `MENU_MINIMIG_CHIPSET1/2`, `user_io.cpp`, `minimig_config.cpp`. Plan/build steps: `docs/OSD_Ethernet_Menu_Plan.md`.
 
 ## Git History
 
