@@ -501,12 +501,35 @@ python3 -m pytest test_lance.py -v -s
 | Clean unattended full x100 run (detached, reach 100) | Validation | ✅ Done — 100/100 |
 | Issue B — RX multicast flood (LADRF hash filter) | Correctness | ✅ Fixed + verified |
 | Issue A — station MAC low bytes `…00:00` (collision risk with 2 cards) | Correctness | ✅ Fixed + verified — unique NIC-derived wire MAC |
-| MAC display byte ordering — shows `00:FFFFFF80:10:...` (sign-extension) | Cosmetic | 🔲 Open (issue #3) |
-| Connect `cpu_berr_n` — watchdog timeout should raise BERR, not return $0000 | Robustness | 🔲 TODO (low) |
+| ~~MAC display byte ordering — shows `00:FFFFFF80:10:...` (sign-extension)~~ | Cosmetic | ⏹️ Re-scoped — won't-fix (lance-test binary, see below) |
+| ~~Connect `cpu_berr_n` — watchdog timeout should raise BERR~~ | Robustness | ⏹️ Re-scoped — N/A on doorbell (see below) |
 | Packet throughput — bounded by the 68020, not the card | Performance | ✅ Characterized |
 
-One non-blocking issue remains: the MAC *display* sign-extension (cosmetic). **Issue A** (on-wire MAC low bytes
-`00:00`) and **Issue B** (multicast flood) were both fixed and verified.
+All correctness issues are resolved. **Issue A** (on-wire MAC low bytes `00:00`) and **Issue B** (multicast
+flood) were both fixed and verified; the remaining items below are re-scoped (won't-fix / future-option).
+
+**MAC display sign-extension re-scoped (2026-06-15) — won't-fix, not our code.** lance-test prints the station
+MAC as `00:FFFFFF80:10:...`: the `0x80` byte is held in a signed `char` and sign-extends to `0xFFFFFF80` in the
+tool's `printf`. This is inside the **pre-compiled `share:lance-test` binary** (no source in this repo), affects
+display only, and has zero effect on operation — the actual MAC on the wire is correct (verified by pcap). Not
+fixable from this project; recorded and closed.
+
+**`cpu_berr_n` re-scoped (2026-06-15) — not applicable to the doorbell architecture.** The original TODO
+("watchdog timeout should raise BERR, not return `$0000`") described the *old bridge* (`rtl/A2065/legacy/
+a2065_registers.v`), which had a 700 000-cycle watchdog that released a stretched access with `$0000` and an
+unconnected `cpu_berr_n` output. The doorbell rewrite removed that entirely:
+
+- **Register reads are zero-latency** (combinational from the CSR shadow) — they cannot time out, so the
+  `$0000`-on-timeout case no longer exists.
+- Only **register writes** (`regs_nrdy`) and **boardram** (`a2065_bram_nrdy`) stretch DTACK, and there is no
+  watchdog — a dead daemon would *hang* the bus, not return `$0000`.
+- The **68020 path uses the TG68 core, which has no functional BERR** — its `berr` port is an Atari-ST 68000
+  stub and isn't wired. `fx68k` has `BERRn` but is 68000-only and hardwired high. A real 020 bus-error
+  exception is not implementable without CPU-core surgery.
+
+A proper BERR is therefore not feasible/worthwhile here. If the daemon-crash hang ever needs hardening, the
+right fix is a *watchdog-release* (timeout in `a2065_regfile` `W_WAIT` / `a2065_ddram` `NR_WAIT` that deasserts
+nrdy and returns `$FFFF`), which is core-agnostic and needs no BERR. Tracked as a future option, not a TODO.
 
 ---
 
