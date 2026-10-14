@@ -6,7 +6,7 @@ no custom Amiga-side software.
 
 > **Status:** Steps 0–11 Complete · Branch `simplification/flat-ddr3-doorbell` · Updated 2026-06-15
 >
-> **Latest build `Minimig_20260613a.rbf` — merged onto upstream Minimig Release 20260603 (`eb7a26e`) and hardware-tested: lance-test 5/5 PASS + DHCP + ping.** See [`releases/`](releases/) and [`docs/A2065_Minimig_Merge_Plan.md`](docs/A2065_Minimig_Merge_Plan.md) §11.
+> **A2065 is upstream in Minimig-AGA_MiSTer and Main_MiSTer.** [`releases/`](releases/) holds the AP030 core and Main binary used to verify the A2065/IDE deadlock fix (2026-10-13, see [`docs/A2065_IDE_Deadlock.md`](docs/A2065_IDE_Deadlock.md)). Earlier builds such as `Minimig_20260613a.rbf` remain in this repository's git history; the merge history is in [`docs/A2065_Minimig_Merge_Plan.md`](docs/A2065_Minimig_Merge_Plan.md) §11.
 
 A formatted HTML version of this overview is at [`docs/A2065_Project_Article.html`](docs/A2065_Project_Article.html);
 the Markdown source is [`docs/A2065_Project_Article.md`](docs/A2065_Project_Article.md).
@@ -103,7 +103,7 @@ up to current upstream so it tracks the mainline core.
 
 Merge details and the full risk register are in
 [`docs/A2065_Minimig_Merge_Plan.md`](docs/A2065_Minimig_Merge_Plan.md) §11.
-The RBF ships in [`releases/Minimig_20260613a.rbf`](releases/Minimig_20260613a.rbf).
+The 20260613a RBF is no longer shipped in [`releases/`](releases/); it is in the git history (before 2026-10-14).
 
 ---
 
